@@ -44,13 +44,13 @@ def feeds(store, config: dict) -> list[dict]:
         last = _ts(st.get("ts"))
         days = CADENCE_DAYS.get(f.get("cadence", "daily"), 1)
         if not f.get("connector"):
-            state = "⚪ " + f.get("note", "Planned")
+            state = f.get("note", "Planned")
         elif not st:
-            state = "⏳ Not run yet"
+            state = "Not run yet"
         elif st["status"] == "ok":
-            state = "✅ OK" + (f" ({f['note']})" if f.get("note") else "")
+            state = "OK" + (f" ({f['note']})" if f.get("note") else "")
         else:
-            state = f"❌ Failed: {st.get('detail', '')[:80]}"
+            state = f"Failed: {st.get('detail', '')[:80]}"
         out.append({**f, "status": state, "last": when(st.get("ts")) if st else ("never" if f.get("connector") else "-"),
                     "next": f"{(last + timedelta(days=days)):%-d %b %H:%M} UTC" if last and f.get("connector") else "-"})
     # Each source a colleague followed, collected by the followed_sources connector.
@@ -58,7 +58,7 @@ def feeds(store, config: dict) -> list[dict]:
     for r in store.q("SELECT * FROM followed WHERE channel='auto' ORDER BY ts"):
         out.append({"name": r["name"], "publisher": f"{r['publisher']} · added by {r['added_by']}",
                     "licence": r["licence"], "cadence": r["cadence"], "connector": "followed_sources",
-                    "status": ("✅ OK" if fs.get("status") == "ok" else "❌ Failed" if fs else "⏳ Not run yet"),
+                    "status": ("OK" if fs.get("status") == "ok" else "Failed" if fs else "Not run yet"),
                     "last": when(fs.get("ts")) if fs else "never", "next": "-"})
     return out
 

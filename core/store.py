@@ -315,7 +315,7 @@ class Store:
                           (publisher, period))
         return rows[0] if rows else None
 
-    # 🔵 internal records (core/internal.py): the company's own deals, one JSON document each
+    # internal records (core/internal.py): the company's own deals, one JSON document each
     def internal_deals(self) -> list[dict]:
         out = []
         for r in self.q("SELECT id, data FROM internal_deals ORDER BY updated DESC, id DESC"):

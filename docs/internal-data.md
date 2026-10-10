@@ -1,4 +1,4 @@
-# Internal data: a third kind of source (🔵)
+# Internal data: a third kind of source
 
 Spec for the PoC, written before the code. Kenneth's ask: separate the company's own deal data from
 external data; the pieces arrive in many formats (PDF, photo, a sentence to the Copilot) and must be
@@ -8,9 +8,9 @@ tidied into one place. The design follows the coordinator's proposal and prototy
 
 | Layer | What | Who sees it | Shown as |
 |---|---|---|---|
-| 🟢 public, collected automatically | open data the licence allows the agent to fetch (Bank of England, news RSS, open-data tables) | the team | green dot |
-| 🟠 external reports, uploaded | agency research a colleague uploads under the team's own access (Knight Frank, Savills…) | the team | orange dot |
-| 🔵 internal | the company's own lettings, leases and valuations | the team, inside the company only | blue dot, chip "🔵 Internal only" or "🔵 Quotable externally" |
+| Open data, collected automatically | open data the licence allows the agent to fetch (Bank of England, news RSS, open-data tables) | the team | green dot |
+| Uploaded external reports | agency research a colleague uploads under the team's own access (Knight Frank, Savills…) | the team | orange dot |
+| Internal | the company's own lettings, leases and valuations | the team, inside the company only | blue dot, chip "Internal only" or "Quotable externally" |
 
 Internal records never mix with market data: they live in their own table, carry their own
 provenance, and are listed under their own heading wherever they appear.
@@ -51,13 +51,13 @@ A match fills empty fields only, never overwrites, and adds the contributor to `
 
 ## 4. Inside and outside, never mixed
 
-- Team brief (markdown and deck): "Our deals 🔵 internal" then "Market deals 🟠 agency reports", each
+- Team brief (markdown and deck): "Our deals (Internal)" then "Market deals (Uploaded agency reports)", each
   item footnoted. Draft records are not listed.
 - IC paper section: only `quotable` records, with a line "n internal-only records not included".
 - External comparison: when a market deal in the library names the same building with a rent, the
   record shows "Also reported externally: <source> shows £70.00 psf against our £72.50; our record is
   kept, difference noted for the brief", and the brief repeats it in italics.
-- Copilot: answers cite internal figures with "🔵 internal only" and never present them as market evidence.
+- Copilot: answers cite internal figures with "Internal only" and never present them as market evidence.
 
 ## 5. A person stays in the loop
 

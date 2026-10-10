@@ -48,7 +48,7 @@ def market_snapshot(ctx, args):
         if not snap:
             continue
         rows.append({"metric": tx.METRICS[metric]["label"],
-                     "value": tx.fmt_value(metric, snap["value"]) + (" ⚠" if snap["status"] == "flagged" else ""),
+                     "value": tx.fmt_value(metric, snap["value"]) + (" (flagged)" if snap["status"] == "flagged" else ""),
                      "period": an.period_label(snap["period"]),
                      "change": None if snap["change"] is None else round(snap["change"], 2),
                      "long_term_avg": None if snap["lta"] is None else tx.fmt_value(metric, snap["lta"]),

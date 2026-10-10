@@ -1,4 +1,4 @@
-"""Internal data (🔵): the company's own lettings, leases and valuations, kept apart from market data.
+"""Internal data: the company's own lettings, leases and valuations, kept apart from market data.
 
 One record shape whatever the route (a sentence to the Copilot, a photo, a PDF, a spreadsheet row):
   property, floor_area, tenant, rent, term, rent_free, date, counterparty   the eight fields people see
@@ -20,7 +20,7 @@ from . import taxonomy as tx
 FIELDS = ["property", "floor_area", "tenant", "rent", "term", "rent_free", "date", "counterparty"]
 LABELS = {"property": "Property", "floor_area": "Floor / area", "tenant": "Tenant", "rent": "Rent", "term": "Term",
           "rent_free": "Rent-free", "date": "Date", "counterparty": "Counterparty"}
-LEVELS = {"internal": "🔵 Internal only", "quotable": "🔵 Quotable externally"}
+LEVELS = {"internal": "Internal only", "quotable": "Quotable externally"}
 MONTHS = "jan feb mar apr may jun jul aug sep oct nov dec".split()
 
 
@@ -275,7 +275,7 @@ def one_line(d: dict) -> str:
 
 
 def market_deals(store, limit: int = 5) -> list[dict]:
-    """The latest period's leasing deals from agency reports (🟠), for the 'Market deals' list beside ours."""
+    """The latest period's leasing deals from agency reports (uploaded), for the 'Market deals' list beside ours."""
     rows = store.q("SELECT d.*, s.title, s.url FROM deals d LEFT JOIN sources s USING (source_id) "
                    "WHERE d.deal_type IN ('letting', 'pre-let', 'sublease') ORDER BY d.period DESC, d.size_sqft DESC")
     if not rows:

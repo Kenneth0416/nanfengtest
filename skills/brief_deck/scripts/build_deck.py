@@ -41,6 +41,28 @@ MIN_SLIDES, MAX_SLIDES = 3, 6
 SO_WHAT_LAYOUTS = {"Hero number", "Stat row", "Chart + takeaway", "Two charts", "Chart + table", "Numbered pillars",
                    "Timeline", "Title only"}
 KEYS = ("chart", "table", "metric")  # values under these name data, they are not text the agent wrote
+# Source tiers are a coloured dot and a text label, never an emoji (prototype/design-tokens.md).
+TIERS = {"open": "2E7D55", "uploaded": "B9781A", "internal": "2F6FBF", "flagged": "B4452E"}
+TIER_LABELS = {"open": "Open data", "uploaded": "Uploaded", "internal": "Internal", "flagged": "Flagged"}
+# Internal or placeholder wording that must never reach a cover; the builder falls back to cover_line().
+COVER_PLACEHOLDER = re.compile(r"none added yet|top team signals|\(none\)|no signals (yet|added)|placeholder|lorem",
+                               re.I)
+
+
+def cover_line(fmt: str, date: str, period: str = "") -> str:
+    """The cover's fallback subtitle: the brief's format and period, e.g. "Board brief · figures to Q2 2026 · 10 Oct 2026"."""
+    kind = "Investment committee paper" if fmt == "ic" else "Board brief"
+    return "  ·  ".join(x for x in (kind, f"figures to {period}" if period else "", date) if x)
+
+
+def clean_cover_text(v, fallback: str):
+    """A cover string (or list of sentences) with placeholder phrases removed; the fallback when nothing is left."""
+    if isinstance(v, list):
+        kept = [x for x in v if isinstance(x, str) and x.strip() and not COVER_PLACEHOLDER.search(x)]
+        return kept or [fallback]
+    if not isinstance(v, str) or not v.strip() or COVER_PLACEHOLDER.search(v):
+        return fallback
+    return v
 
 
 def rgb(h):
@@ -232,6 +254,28 @@ class Painter:
         self.band = self.c.get("band", self.c["dark"])  # so-what band and table header; raised on dark themes
         self.d = d
 
+    def dot(self, slide, x, y, tier, size=Pt(7)):
+        """A small filled oval in the tier colour, drawn just before a label (x, y: the label's left and top)."""
+        o = slide.shapes.add_shape(MSO_SHAPE.OVAL, x, y, size, size)
+        o.fill.solid()
+        o.fill.fore_color.rgb = rgb(TIERS[tier])
+        o.line.fill.background()
+        o.name = f"tier dot {tier}"
+        return o
+
+    def legend(self, slide, x, y, tiers):
+        """One row of tier dots and labels (the provenance key on the Sources slide)."""
+        c = self.c
+        texts = {"open": "Open data, collected automatically", "uploaded": "Uploaded by a colleague under the team's own access",
+                 "internal": "Internal, our own records"}
+        for tier in tiers:
+            self.dot(slide, x, y + Inches(0.05), tier)
+            w = Pt(len(texts[tier]) * 4.6 + 12)
+            tb = slide.shapes.add_textbox(x + Pt(10), y - Inches(0.04), w, Inches(0.25))
+            tb.text_frame.margin_left = tb.text_frame.margin_right = 0
+            put(tb, [[(texts[tier], {"size": 9, "color": c["muted"]})]])
+            x += Pt(10) + w + Inches(0.2)
+
     # charts -------------------------------------------------------------
     def style(self, chart, legend=False):
         c = self.c
@@ -342,16 +386,23 @@ class Painter:
             head = ["SUBMARKET"] + [cl["label"].upper() for cl in ev[0]["cells"]] if ev else ["SUBMARKET"]
             rows = [tuple(head)] + [tuple([r["market"]] + [cl["text"] for cl in r["cells"]]) for r in ev]
             widths = None
-        if key == "deals":  # our deals (🔵, confirmed, quotable only in an IC pack) above market deals (🟠)
+        if key == "deals":  # our deals (internal, confirmed, quotable only in an IC pack) above market deals (uploaded)
             rows = [("DEAL", "TENANT", "RENT", "TERM", "RENT-FREE", "WHEN", "SOURCE")]
             rows += [(x["property"], x["tenant"], x["rent"] or "-", x["term"] or "-", x["rent_free"] or "-", x["date"] or "-",
-                      "🔵 internal" + (", quotable" if x["level"] == "quotable" else " only")) for x in d.get("our_deals") or []]
-            rows += [(x["property"], x["tenant"], x["rent"] or "-", "-", "-", x["period"], f"🟠 {x['ref']}")
+                      "Internal" + (", quotable" if x["level"] == "quotable" else " only")) for x in d.get("our_deals") or []]
+            tiers = ["internal"] * len(d.get("our_deals") or [])
+            rows += [(x["property"], x["tenant"], x["rent"] or "-", "-", "-", x["period"], f"Uploaded {x['ref']}")
                      for x in d.get("market_deals") or []]
+            tiers += ["uploaded"] * len(d.get("market_deals") or [])
             if len(rows) == 1:
                 rows.append(("No confirmed deals", "", "", "", "", "", ""))
             widths = [3.0, 2.4, 1.3, 1.1, 1.3, 1.2, 1.8]
         tbl = slide.shapes.add_table(len(rows), len(rows[0]), x, y, w, Inches(0.42) * len(rows)).table
+        if key == "deals" and len(rows) > 1 and widths:  # a tier dot before each SOURCE label
+            col_x = x + Inches(sum(widths[:-1]))
+            for r_i, tier in enumerate(tiers, 1):
+                tbl.cell(r_i, len(rows[0]) - 1).margin_left = Inches(0.25)
+                self.dot(slide, col_x + Inches(0.09), y + Inches(0.42) * r_i + Inches(0.09), tier)  # level with top-anchored text
         if self.t["background"].startswith("solid dark"):  # the default table style draws white grid lines
             tbl._tbl.tblPr.find(qn("a:tableStyleId")).text = "{2D5ABB26-0587-4C30-8999-92F81FD0307C}"
         if widths:
@@ -388,8 +439,8 @@ class Painter:
             out.append([
                 [((t["label"] + (f" · {t['period']}" if t.get("period") else "")).upper(),
                   {"size": 9, "bold": True, "color": c["on_dark_muted"]})],
-                [(t["text"] + (" ⚠" if t["flagged"] else ""), {"size": 30, "bold": True, "font": self.t["fonts"]["head"],
-                                                                "color": c["on_dark"]}),
+                [(t["text"], {"size": 30, "bold": True, "font": self.t["fonts"]["head"], "color": c["on_dark"]}),
+                 (" (flagged)" if t["flagged"] else "", {"size": 10, "color": c["on_dark_muted"]}),
                  (" " + t["ref"], {"size": 10, "color": c["on_dark_muted"]})],
                 [(sub, {"size": 10, "color": c["on_dark_muted"]})]])
         return out
@@ -406,7 +457,9 @@ class Painter:
         ctx = [f"{chg_text(k)} {k['ref']}".strip()]
         if k.get("vs_lta_pct") is not None and metric != "vacancy_pct":
             ctx.append(f"{k['vs_lta_pct']:+d}% against the long-term average.")
-        return k["text"] + (" ⚠" if k["flagged"] else ""), f"{k['label']} · {k['period']}".upper(), ctx
+        if k["flagged"]:
+            ctx.insert(0, "Flagged by a colleague, not yet checked.")
+        return k["text"], f"{k['label']} · {k['period']}".upper() + (" · FLAGGED" if k["flagged"] else ""), ctx
 
     def stats(self, metrics):
         """(figure, caption, context) per cell of the Stat row; "auto" is the Cover's four KPIs."""
@@ -466,7 +519,7 @@ class Painter:
         mark, word, col = self.tone(cd["tone"])
         detail = cd["detail"] if len(cd["detail"]) < 180 else cd["detail"][:177].rsplit(" ", 1)[0] + "…"
         return [[(f"{mark} {word}", {"size": 9, "bold": True, "color": col}),
-                 (("  ⚠ " + cd["flag"]) if cd.get("flag") else "", {"size": 9, "color": c["bad"]})],
+                 (("  " + cd["flag"]) if cd.get("flag") else "", {"size": 9, "color": TIERS["flagged"]})],
                 [(cd["title"], {"size": 12, "bold": True, "color": c["ink"], "font": self.t["fonts"]["head"]})],
                 [(detail + " " + cd["refs"], {"size": 9})],
                 [(cd["why"], {"size": 9, "italic": True, "color": c["muted"]})]]
@@ -488,6 +541,42 @@ class Painter:
         cover.fill.fore_color.rgb = rgb(self.c["bg"])
         cover.line.fill.background()
 
+    def cover_kpis(self, slide, phs, tiles):
+        """The cover's KPI block: one tile per KPI with a value, its accent rule above it. The layout draws
+        four rules; when fewer tiles have a value the rules are masked in the cover colour and redrawn over
+        the tiles that stay, centred on the row, so no rule is ever left with nothing under it."""
+        slots = [phs[f"kpi{i}"] for i in range(1, 5) if f"kpi{i}" in phs]
+        if not slots:
+            return
+        for i, tile in enumerate(tiles[:4], 1):
+            put(phs.pop(f"kpi{i}"), tile)
+        n = min(len(tiles), 4)
+        if n == len(slots):
+            return
+        try:
+            bg = str(slide.slide_layout.background.fill.fore_color.rgb)
+        except Exception:  # noqa: BLE001
+            bg = self.c["dark"]
+        x0, top, w, h = area(slots[0])
+        x1 = slots[-1].left + slots[-1].width
+        gap = (slots[1].left - slots[0].left - w) if len(slots) > 1 else Inches(0.18)
+        mask = slide.shapes.add_shape(MSO_SHAPE.RECTANGLE, x0 - Inches(0.1), top - Inches(0.18), x1 - x0 + Inches(0.2),
+                                      Inches(0.16))
+        mask.fill.solid()
+        mask.fill.fore_color.rgb = rgb(bg)
+        mask.line.fill.background()
+        mask.name = "kpi rule mask"
+        if n == 0:
+            return
+        left = x0 + ((x1 - x0) - (n * w + (n - 1) * gap)) // 2
+        for i in range(n):
+            x = left + i * (w + gap)
+            slots[i].left, slots[i].top, slots[i].width, slots[i].height = x, top, w, h  # all four: a placeholder
+            # inherits its box from the layout, and writing one side alone loses the other three
+            ln = slide.shapes.add_connector(1, x, top - Inches(0.1), x + w, top - Inches(0.1))
+            ln.line.color.rgb, ln.line.width = rgb(self.c["accent"]), Pt(3)
+            ln.name = f"kpi rule {i + 1}"
+
     def so_what(self, slide, text):
         """The dark band near the foot of a content slide: a label and one sentence (the slide's so-what)."""
         c = self.c
@@ -508,9 +597,7 @@ class Painter:
         if d["flagged"]:
             paras += ["", [("FLAGGED FIGURES, NOT YET CHECKED", {"bold": True, "color": c["bad"], "size": 9})],
                       *d["flagged"]]
-        paras += ["", [(d["caveat"], {"italic": True, "color": c["muted"]})],
-                  [("🟢 collected automatically from open data · 🟠 uploaded by a colleague under the team's own access",
-                    {"color": c["muted"]})]]
+        paras += ["", [(d["caveat"], {"italic": True, "color": c["muted"]})]]
         return paras
 
     def talk(self):
@@ -602,8 +689,8 @@ def default_spec(d: dict, theme: str | None = None) -> dict:
         note = f"{d['deals_filtered']} internal-only record(s) left out of the IC pack. " if d.get("deals_filtered") else ""
         slides.append({"key": "deals", "layout": "Title only", "eyebrow": f"{n:02d}  ·  DEALS",
                        "title": t, "so_what": next((x["ext"] for x in ours if x.get("ext")), ""),
-                       "notes": note + "Our deals are 🔵 internal: " + ("; ".join(f"{x['property']} {x['rent']}" for x in ours) or "none")
-                                + ". Market deals come from agency reports (🟠).",
+                       "notes": note + "Our deals are internal: " + ("; ".join(f"{x['property']} {x['rent']}" for x in ours) or "none")
+                                + ". Market deals come from uploaded agency reports.",
                        "fill": {"table": {"table": "deals"}}})
     n += 1
     slides.append({"key": "signals", "layout": "Signal cards", "eyebrow": f"{n:02d}  ·  WHAT CHANGED",
@@ -654,6 +741,12 @@ def build(d: dict, out: str | Path, spec: dict | None = None, theme: str | None 
         phs = {name: present[idx] for name, idx in by_name.items() if idx in present}
         fill = {k: (auto[k] if v == "auto" and k in auto else v) for k, v in (s.get("fill") or {}).items()}
         fill = {k: ({k: v} if k in ("table", "chart") and isinstance(v, str) else v) for k, v in fill.items()}
+        if s["layout"] == "Cover":  # no internal or placeholder wording on a cover: the brief's format and period instead
+            line = cover_line(d.get("format", "board"), d.get("date", ""), (d.get("kpis") or [{}])[0].get("period", ""))
+            s = {**s, "title": clean_cover_text(s.get("title", ""), d.get("title", ""))}
+            for k in ("subtitle", "headline", "caveat"):
+                if k in fill:
+                    fill[k] = clean_cover_text(fill[k], line)
         if "title" in phs:
             ph = phs.pop("title")
             base = paint.t["fonts"].get("cover_size", 38) if s["layout"] == "Cover" else paint.t["fonts"]["title_size"]
@@ -680,9 +773,9 @@ def build(d: dict, out: str | Path, spec: dict | None = None, theme: str | None 
             paint.timeline(slide, phs, fill.pop("steps"))
         if s.get("eyebrow") and "eyebrow" in phs:
             put(phs.pop("eyebrow"), s["eyebrow"].upper())
-        if fill.pop("kpis", None):
-            for i, tile in enumerate(paint.kpi_tiles(), 1):
-                put(phs.pop(f"kpi{i}"), tile)
+        if s["layout"] == "Cover":
+            tiles = [t for t in paint.kpi_tiles() if t[1][0][0].strip()] if fill.pop("kpis", None) else []
+            paint.cover_kpis(slide, phs, tiles)
         if fill.pop("cards", None):
             used = paint.cards()
             for i, c in enumerate(used, 1):
@@ -697,7 +790,10 @@ def build(d: dict, out: str | Path, spec: dict | None = None, theme: str | None 
                 put(phs.pop("talk"), paint.talk())
         if fill.get("body") == "auto" and s["layout"] == "Sources":
             fill.pop("body")
-            put(phs.pop("body"), paint.sources())
+            body = phs.pop("body")
+            body.left, body.top, body.width, body.height = body.left, body.top, body.width, Inches(4.8)  # room for the key
+            put(body, paint.sources())
+            paint.legend(slide, Inches(0.6), Inches(6.76), ["open", "uploaded"] + (["internal"] if d.get("our_deals") else []))
         if isinstance(fill.get("hero"), dict):
             fig, cap, ctx = paint.hero(fill.pop("hero")["metric"])
             # the template's 60pt fits "8.0%"; a figure with a unit ("14.30m sq ft") is scaled to stay on one line

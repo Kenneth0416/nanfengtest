@@ -36,9 +36,9 @@ def publisher_gaps(question: str, store) -> list[str]:
     for p in sorted(asked - held):
         if p in followed:
             notes.append(f"The team follows {followed[p]}, but nobody has uploaded a {p} report yet, so the library "
-                         f"has no {p} figures. Anyone can upload one on 🗂️ Sources.")
+                         f"has no {p} figures. Anyone can upload one on the Sources page.")
         else:
-            notes.append(f"The library has no {p} figures yet. Anyone can upload a {p} report on 🗂️ Sources, "
+            notes.append(f"The library has no {p} figures yet. Anyone can upload a {p} report on the Sources page, "
                          f"or ask me to follow {p}.")
     if notes and held - {"Bank of England", "Office for National Statistics"}:
         others = ", ".join(sorted(held - {"Bank of England", "Office for National Statistics", None}))

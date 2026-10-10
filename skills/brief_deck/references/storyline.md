@@ -27,7 +27,7 @@ in one sentence) · Stat row · Numbered pillars (what it means) · Timeline · 
 - **Labels:** what is plotted and the unit: "Prime rent, £/sq ft, Q2 2026".
 - **takeaway:** two to four short lines, each carrying its footnote mark.
 - **source:** the footnote and anything missing ("Quarters with no figures are not shown").
-- **notes:** two or three sentences an analyst would say out loud, including ⚠ figures and unconfirmed talk.
+- **notes:** two or three sentences an analyst would say out loud, including flagged figures and unconfirmed talk.
 
 ## Figures
 

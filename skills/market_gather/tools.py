@@ -103,7 +103,7 @@ def check_report_index(ctx, args):
 
 
 def follow_source(ctx, args):
-    """Check a source's terms and follow it for the whole team (🟢 auto or 🟠 upload)."""
+    """Check a source's terms and follow it for the whole team (auto or upload)."""
     src = follow.resolve(args.get("source", "") or args.get("url", ""))
     if not src["url"]:
         return {"summary": f"I don't know where '{src['name']}' is published. Paste its link and I'll check its terms.",
@@ -118,19 +118,19 @@ def follow_source(ctx, args):
     verdict = follow.assess(src["url"], **ev)
     if args.get("propose"):  # show the plan first; nothing is saved until someone adds it for the team
         p = follow.proposal(ctx.store, src, verdict, args.get("cadence", ""))
-        return {"summary": f"**{p['name']}**: {'🟢 collected automatically' if p['channel'] == 'auto' else '🟠 upload-only'}"
+        return {"summary": f"**{p['name']}**: {'collected automatically' if p['channel'] == 'auto' else 'upload-only'}"
                            f" ({p['licence']}). {p['how']} Adds: {p['adds']}. Nothing is added until you confirm.",
                 "data": {**p, "evidence": ev}}
     row = follow.follow(ctx.store, src, verdict, ctx.role, args.get("cadence", ""))
     if row["already"]:
         return {"summary": f"{row['added_by']} already follows **{row['name']}** for the team "
-                           f"({'🟢 collected automatically' if row['channel'] == 'auto' else '🟠 uploaded by the team'}).",
+                           f"({'collected automatically' if row['channel'] == 'auto' else 'uploaded by the team'}).",
                 "data": row}
     if row["channel"] == "auto":
-        head = (f"Following **{row['name']}** for the whole team. 🟢 The agent collects it {row['cadence']} "
+        head = (f"Following **{row['name']}** for the whole team. The agent collects it {row['cadence']} "
                 f"({'feed items' if row['kind'] == 'rss' else 'headlines and links only'}).")
     else:
-        head = (f"Following **{row['name']}** for the whole team as 🟠 upload-only: the agent won't fetch it, and "
+        head = (f"Following **{row['name']}** for the whole team as upload-only: the agent won't fetch it, and "
                 f"the team is reminded to upload each {row['cadence']} issue.")
     why = row["reason"] + (f' Terms: "{row["quote"]}"' if row["quote"] else "")
     return {"summary": f"{head}\n\nWhy: {why}", "data": row}
@@ -145,7 +145,7 @@ def list_followed(ctx, args):
     rows = ctx.store.q("SELECT * FROM followed ORDER BY ts DESC")
     if not rows:
         return {"summary": "The team doesn't follow any extra sources yet.", "data": []}
-    return {"summary": "\n".join(f"- {'🟢' if r['channel'] == 'auto' else '🟠'} {r['name']} ({r['cadence']}, "
+    return {"summary": "\n".join(f"- {r['name']} ({'open data' if r['channel'] == 'auto' else 'uploaded'}, {r['cadence']}, "
                                  f"added by {r['added_by']}): {r['licence']}" for r in rows), "data": rows}
 
 

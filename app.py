@@ -1008,7 +1008,7 @@ def needs_a_person_panel():
             c = st.columns([3, 1.3], vertical_alignment="center")
             c[0].html(f'<span class="loa-dot amber"></span><b style="font-size:14px">{esc(r["market"])} {esc(label)}, '
                       f'{esc(an.period_label(r["period"]))}</b><div class="loa-muted" style="margin-left:17px">'
-                      f'{esc(an.warning(r).lstrip("⚠ ").removeprefix("Flagged: "))}</div>')
+                      f'{esc(an.warning(r).removeprefix("Flagged: "))}</div>')
             if c[1].button(f"Keep {tx.fmt_value(r['metric'], r['value'])}", key=f"keep{r['rowid']}", width="stretch"):
                 app.store.resolve_observation(r["rowid"], user, True)
                 app.store.log("resolve", user, f"checked {r['market']} {label}: correct")
@@ -1484,12 +1484,12 @@ def needs_a_person():
         for sid, rows in by_source.items():
             src = rows[0]
             with st.expander(f"{len(rows)} figure(s) to check from {src['title'] or sid} "
-                             f"({an.provenance(src).lstrip('🟢🟠 ')})", expanded=len(by_source) == 1):
+                             f"({an.provenance(src)})", expanded=len(by_source) == 1):
                 for r in rows:
                     c = st.columns([5, 1, 1], vertical_alignment="center")
                     c[0].markdown(f"**{r['market']} {tx.METRICS[r['metric']]['label'].lower()}** "
                                   f"{tx.fmt_value(r['metric'], r['value'])} ({an.period_label(r['period'])})  \n"
-                                  f":gray[{an.warning(r).lstrip('⚠ ').removeprefix('Flagged: ')}]")
+                                  f":gray[{an.warning(r).removeprefix('Flagged: ')}]")
                     if c[1].button("Right", icon=material("check"), key=f"ok{r['rowid']}", help="Checked against the report: keep it"):
                         app.store.resolve_observation(r["rowid"], user, True)
                         app.store.log("resolve", user, f"checked {r['market']} {tx.METRICS[r['metric']]['label'].lower()} "
@@ -1534,7 +1534,7 @@ def upload_section():
                "anyone on the team uploads the PDF they can access. The agent turns each data page into an image, "
                "reads it with the vision model and checks every figure against the page text, a plausible range and "
                "what the library already holds. Figures that pass are shared as they are; the rest are shared "
-               "with ⚠ until anyone checks them. Unticked figures are dropped.")
+               "as flagged until anyone checks them. Unticked figures are dropped.")
     up = st.file_uploader("PDF report", type=["pdf"])
     sample = app.root / "reference" / "samples" / "sample_bnp_paribas_q2_2025_restated.pdf"
     use_sample = sample.exists() and st.button("Try the sample (BNP Paribas Q2 2025, restated)")

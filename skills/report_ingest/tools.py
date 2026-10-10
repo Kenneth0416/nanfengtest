@@ -12,12 +12,12 @@ def ingest_report(ctx, args):
     lines = [f"**{analysis['publisher']} report, period {analysis['period']}** "
              f"({len(analysis['candidates'])} figures extracted with {analysis['method']})"]
     for c in analysis["candidates"]:
-        flag = " ⚠ " + " ".join(c["flags"]) if c["flags"] else ""
+        flag = " (check: " + " ".join(c["flags"]) + ")" if c["flags"] else ""
         lines.append(f"- {c['market']} {tx.METRICS[c['metric']]['label']}: {tx.fmt_value(c['metric'], c['value'])}{flag}")
     if args.get("save"):
         res = documents.save_document(ctx.store, analysis, user=ctx.role)
         lines.append(f"Shared {res['saved']} figures with the team as source {res['source_id']}; "
-                     f"{res['flagged']} are marked ⚠ until someone checks them.")
+                     f"{res['flagged']} are flagged until someone checks them.")
         ctx.store.log("upload", ctx.role, f"uploaded {analysis['publisher']} {analysis['period']}: "
                       f"{res['saved']} figures, {res['flagged']} to check")
     else:

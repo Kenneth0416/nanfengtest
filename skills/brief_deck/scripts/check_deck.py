@@ -2,7 +2,8 @@
 
 The QA loop from Grok Build's pptx skill, reimplemented for this deck: assume there are problems and
 look for them. Checks slide count (3-6), Cover first and Sources last, empty or leftover placeholder
-text, speaker notes on every slide, text likely to overflow its box, text boxes that overlap each
+text, a cover KPI rule with no number under it or internal wording ("none added yet") on the cover,
+speaker notes on every slide, text likely to overflow its box, text boxes that overlap each
 other or run off the slide, fonts used, and (with --data) any number the data does not hold.
 Prints a JSON report; exit code 1 if anything fails. Always render and look at the slides as well."""
 from __future__ import annotations
@@ -18,7 +19,7 @@ from pptx import Presentation
 from pptx.util import Emu
 
 sys.path.insert(0, str(Path(__file__).parent))
-from build_deck import MAX_SLIDES, MIN_SLIDES, check_text  # noqa: E402
+from build_deck import COVER_PLACEHOLDER, MAX_SLIDES, MIN_SLIDES, check_text  # noqa: E402
 
 CHARS_PER_SQIN = {8: 260, 9: 210, 10: 170, 11: 140, 12: 118, 13: 100, 14: 86, 15: 76, 16: 66, 22: 34, 24: 29,
                   26: 25, 30: 18, 38: 11, 60: 4}
@@ -99,6 +100,42 @@ def overlap(a, b) -> bool:
     return ix > Emu(91440 * 0.05) and iy > Emu(91440 * 0.05)  # more than 0.05 in both ways
 
 
+def is_rule(sh) -> bool:
+    """A horizontal accent rule: a connector or a zero-height shape at least an inch wide."""
+    return (sh.shape_type == 9 or (sh.height or 0) <= Emu(12700)) and (sh.width or 0) >= Emu(914400) and not (
+        sh.has_text_frame and sh.text_frame.text.strip())
+
+
+def masked(rule, slide) -> bool:
+    """Is the layout's rule hidden under a filled shape the builder drew on the slide?"""
+    rx0, ry0, rx1, _ = box(rule)
+    for sh in slide.shapes:
+        if sh.has_text_frame and sh.text_frame.text.strip() or is_rule(sh) or sh.shape_type != 1:
+            continue
+        x0, y0, x1, y1 = box(sh)
+        if x0 <= rx0 + Emu(9144) and x1 >= rx1 - Emu(9144) and y0 <= ry0 <= y1:
+            return True
+    return False
+
+
+def cover_problems(slide) -> list[str]:
+    """A rule on the cover with no number under it (an empty KPI slot), or placeholder wording on the cover."""
+    out = []
+    texts = [sh for sh in slide.shapes if sh.has_text_frame and sh.text_frame.text.strip()]
+    rules = [sh for sh in slide.slide_layout.shapes if is_rule(sh) and not masked(sh, slide)]
+    rules += [sh for sh in slide.shapes if is_rule(sh)]
+    for r in rules:
+        x0, y0, x1, _ = box(r)
+        under = [t for t in texts if y0 <= box(t)[1] <= y0 + Emu(457200) and box(t)[0] < x1 and box(t)[2] > x0]
+        if not any(re.search(r"\d", t.text_frame.text) for t in under):
+            out.append(f"cover: a KPI rule at {Emu(x0).inches:.1f} in has no number under it")
+    for t in texts:
+        m = COVER_PLACEHOLDER.search(t.text_frame.text)
+        if m:
+            out.append(f"cover: placeholder wording {m.group(0)!r} in {t.name}")
+    return out
+
+
 def check(path: str, data: dict | None = None) -> dict:
     prs = Presentation(path)
     W, H = prs.slide_width, prs.slide_height
@@ -117,6 +154,8 @@ def check(path: str, data: dict | None = None) -> dict:
                 problems.append(f"slide {i}: empty placeholder {sh.name}")
         if not s.has_notes_slide or not s.notes_slide.notes_text_frame.text.strip():
             problems.append(f"slide {i}: no speaker notes")
+        if s.slide_layout.name == "Cover":
+            problems += [f"slide {i}: {p}" for p in cover_problems(s)]
         texts = [sh for sh in s.shapes if sh.has_text_frame and sh.text_frame.text.strip()]
         for sh in s.shapes:
             charts += bool(getattr(sh, "has_chart", False) and sh.has_chart)

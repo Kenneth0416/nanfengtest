@@ -153,7 +153,7 @@ def _analysis(ctx, args, steps):
 
 def check_figures(ctx, args):
     a = _analysis(ctx, args, None)
-    lines = [f"- {'✓' if c['suggest_keep'] else '⚠'} {c['market']} {tx.METRICS[c['metric']]['label']} "
+    lines = [f"- {'passed' if c['suggest_keep'] else 'check'}: {c['market']} {tx.METRICS[c['metric']]['label']} "
              f"{tx.fmt_value(c['metric'], c['value'])} [{c['status']}] {' '.join(c['flags'])}" for c in a["candidates"]]
     passed = sum(c["suggest_keep"] for c in a["candidates"])
     return {"summary": f"{passed} of {len(a['candidates'])} pass all three checks.\n" + "\n".join(lines),
@@ -171,7 +171,7 @@ def stage_figures(ctx, args):
 
 def save_figures(ctx, args):
     """For automatic sources (open data, public filings): save now. Passed figures are shared as they
-    are; the rest are shared with ⚠ for anyone to check."""
+    are; the rest are shared flagged for anyone to check."""
     a = _analysis(ctx, args, args.get("steps"))
     if args.get("path") and docs.duplicate_of(ctx.store, _local(args["path"])):
         return {"summary": "Already in the library; nothing saved.", "data": None}
@@ -179,7 +179,7 @@ def save_figures(ctx, args):
                              licence=args.get("licence", ""))
     ctx.store.log("auto" if args.get("channel", "auto") == "auto" else "upload", "Information agent",
                   f"filed {a['publisher']} {a['period']}: {res['saved']} figures, {res['flagged']} to check")
-    return {"summary": f"Saved {res['saved']} figures as {res['source_id']}; {res['flagged']} marked ⚠ for a person.",
+    return {"summary": f"Saved {res['saved']} figures as {res['source_id']}; {res['flagged']} flagged for a person to check.",
             "data": res}
 
 
@@ -259,7 +259,7 @@ def save_internal_deal(ctx, args):
 
 
 def deals_from_table(ctx, args):
-    """read-table for 🔵 internal spreadsheets: one record per row, merged where the team already has the deal."""
+    """read-table for internal spreadsheets: one record per row, merged where the team already has the deal."""
     head = read_table(ctx, {"source": args["path"], "sheet": args.get("sheet"), "rows": 500,
                             "skiprows": args.get("skiprows", 0)})
     rows = I.deals_from_rows(head["data"]["head"])
@@ -308,7 +308,7 @@ TOOLS = [
     Tool("stage_figures", "For a colleague's upload: keep the checked figures for them to review and publish.",
          obj_schema({**FIGS, "steps": {"type": "array", "items": {"type": "string"}}}, ["path", "figures"]),
          stage_figures, read_only=False),
-    Tool("save_figures", "For an automatic source: save checked figures now (failed checks are saved with ⚠).",
+    Tool("save_figures", "For an automatic source: save checked figures now (failed checks are saved flagged).",
          obj_schema({**FIGS, "channel": {"type": "string", "enum": ["auto", "upload"]}, "licence": {"type": "string"},
                      "steps": {"type": "array", "items": {"type": "string"}}}, ["figures"]), save_figures, read_only=False),
     Tool("read_table", "read-table: read a CSV, Excel or JSON table from a link or file: columns, row count, first rows.",
@@ -317,14 +317,14 @@ TOOLS = [
     Tool("read_photo", "read-photo: the vision model reads a photo, screenshot or short PDF of one of OUR OWN deals "
                        "(lease page, heads of terms, a message) and returns the deal fields it can see.",
          obj_schema({"path": {"type": "string"}, "hint": {"type": "string"}}, ["path"]), read_photo),
-    Tool("save_internal_deal", "File one of our deals as a 🔵 internal record (merged into the same property and floor "
+    Tool("save_internal_deal", "File one of our deals as an internal record (merged into the same property and floor "
                                "if the team already has it). fields: property, floor_area, tenant, rent, term, rent_free, "
                                "date, counterparty; how: 'photo', 'PDF', 'screenshot'; original: the file path.",
          obj_schema({"fields": {"type": "object", "properties": {k: {"type": "string"} for k in I.FIELDS}},
                      "how": {"type": "string"}, "original": {"type": "string"},
                      "confidence": {"type": "string", "enum": ["high", "medium", "low"]}}, ["fields"]),
          save_internal_deal, read_only=False),
-    Tool("deals_from_table", "read-table for a spreadsheet of OUR OWN deals: one 🔵 internal record per row (columns "
+    Tool("deals_from_table", "read-table for a spreadsheet of OUR OWN deals: one internal record per row (columns "
                              "matched by name: property, floor/area, tenant, rent, term, rent-free, date, counterparty).",
          obj_schema({"path": {"type": "string"}, "sheet": {"type": "string"}, "skiprows": {"type": "integer"}}, ["path"]),
          deals_from_table, read_only=False),

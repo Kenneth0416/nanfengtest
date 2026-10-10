@@ -42,7 +42,7 @@ class App:
         return reports
 
     def seed_internal(self):
-        """Three demo 🔵 internal records (reference/seed/internal_deals.json) when the team has none yet, so the
+        """Three demo internal records (reference/seed/internal_deals.json) when the team has none yet, so the
         Sources page and the brief show the inside / outside split from the first run."""
         from .internal import finish, load_json, compare_external
         path = self.root / "reference" / "seed" / "internal_deals.json"

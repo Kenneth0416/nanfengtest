@@ -1,4 +1,4 @@
-"""🔵 Internal data tools for the Copilot: record one of our deals from a sentence, list, confirm, mark.
+"""Internal data tools for the Copilot: record one of our deals from a sentence, list, confirm, mark.
 The photo / PDF / spreadsheet routes are in skills/info_processing (read_photo, deals_from_table) and on
 the Sources page; all routes end in core.internal.record, so a record has one shape."""
 from __future__ import annotations
@@ -15,7 +15,7 @@ def _card(d: dict) -> str:
     lines += [f"- {I.LABELS[k]}: {d.get(k) or '_missing_'}" for k in I.FIELDS if k != "property"]
     lines.append("- Recorded by: " + "; ".join(f"{w} ({h}, {t})" for w, h, t in d.get("recorded_by", [])))
     if d.get("ext"):
-        lines.append(f"- ⚠ {d['ext']['text']}")
+        lines.append(f"- Check: {d['ext']['text']}")
     return "\n".join(lines)
 
 
@@ -37,10 +37,10 @@ def record_deal(ctx, args):
                                          + (f" (draft, {len(d['missing'])} fields missing)" if d["missing"] else "")))
     head = (f"Merged into the record the team already had for **{d['property']}** (same property and floor); "
             f"filled {', '.join(I.LABELS[k] for k in res['filled']) or 'nothing new'}."
-            if res["merged"] else f"Recorded as one of our deals, 🔵 internal only, visible to the team.")
+            if res["merged"] else f"Recorded as one of our deals, Internal only, visible to the team.")
     if d["missing"]:
         head += f" Still missing: {', '.join(I.LABELS[k] for k in d['missing'])}; a photo of the lease or one more sentence fills them."
-    head += f" {ctx.role} confirms it on Sources › 🔵 Internal data."
+    head += f" {ctx.role} confirms it on Sources › Internal data."
     return {"summary": head + "\n\n" + _card(d), "data": {"recorded": True, "merged": res["merged"], "deal": d}}
 
 
@@ -52,8 +52,8 @@ def list_our_deals(ctx, args):
         deals = [d for d in deals if args["submarket"].lower() in (d.get("submarket") or "").lower()]
     if not deals:
         return {"summary": "No internal records yet. Anyone can add one: tell me a deal, or drop a photo, PDF or "
-                           "spreadsheet on Sources › 🔵 Internal data.", "data": []}
-    return {"summary": f"{len(deals)} of our deals (🔵 internal; {sum(d.get('status') == 'draft' for d in deals)} draft):\n\n"
+                           "spreadsheet on Sources › Internal data.", "data": []}
+    return {"summary": f"{len(deals)} of our deals (Internal; {sum(d.get('status') == 'draft' for d in deals)} draft):\n\n"
                        + "\n\n".join(_card(d) for d in deals[: args.get("limit", 8)]), "data": deals}
 
 
@@ -82,7 +82,7 @@ TOOLS = [
                         "person's sentence; pass fields you understood as well. Merged into the existing record for "
                         "the same property and floor; saved as a draft when fields are missing. Never for market news.",
          obj_schema({"text": {"type": "string"}, "submarket": {"type": "string"}, **FIELD_PROPS}), record_deal, read_only=False),
-    Tool("list_our_deals", "Our own deal records (🔵 internal): fields, who recorded them, drafts, external comparisons.",
+    Tool("list_our_deals", "Our own deal records (Internal): fields, who recorded them, drafts, external comparisons.",
          obj_schema({"status": {"type": "string", "enum": ["draft", "confirmed"]}, "submarket": {"type": "string"},
                      "limit": {"type": "integer"}}), list_our_deals),
     Tool("confirm_deal", "The recorder confirms an internal record is right.", obj_schema({"id": {"type": "integer"}}, ["id"]),

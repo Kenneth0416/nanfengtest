@@ -131,7 +131,7 @@ def deck_data(ctx, fmt: str = "board") -> dict:
             market, _ = an.resolve_for_metric(st, m, metric)
             sn = snap(market, metric)
             row["cells"].append({"metric": metric, "label": tx.METRICS[metric]["label"],
-                                 "text": (sn["text"] + (" ⚠" if sn["flagged"] else "") + " " + sn["ref"]) if sn else "n/a",
+                                 "text": (sn["text"] + (" (flagged)" if sn["flagged"] else "") + " " + sn["ref"]) if sn else "n/a",
                                  "change": chg_text(sn) if sn else ""})
         evidence.append(row)
 
@@ -149,7 +149,8 @@ def deck_data(ctx, fmt: str = "board") -> dict:
         "format": fmt, "evidence": evidence, "focus": {"markets": focus.get("markets") or []},
         "title": "IC paper: London office market" if fmt == "ic" else f"{team.get('name', 'Team')}: weekly brief",
         "date": f"{date.today():%d %b %Y}",
-        "picked_by": f"{len(sigs)} signals chosen by {', '.join(who)}" if picked else "Top team signals (none added yet)",
+        "picked_by": (f"{len(sigs)} signals chosen by {', '.join(who)}" if picked
+                      else build_deck.cover_line(fmt, f"{date.today():%d %b %Y}", kpis[0]["period"] if kpis else "")),
         "headline": team_summary(st, sigs),
         "kpis": kpis, "macro": macro,
         "vacancy": series("London", "vacancy_pct"), "take_up": series("London", "take_up_msqft"),

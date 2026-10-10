@@ -14,4 +14,4 @@ tools named there. Add a skill by adding a folder with a `SKILL.md`; no code cha
 | read-article | news, newsletters, LinkedIn posts, colleagues' tips | classify_item, find_matches, save_item, score_hotness |
 | map-submarkets | turning a publisher's market names into the team's submarkets | map_markets |
 | check-figures | the three checks before any figure is saved | check_figures, stage_figures, save_figures |
-| read-photo | 🔵 our own deals from a photo, screenshot, lease PDF or spreadsheet | read_photo, save_internal_deal, deals_from_table |
+| read-photo | our own deals (internal data) from a photo, screenshot, lease PDF or spreadsheet | read_photo, save_internal_deal, deals_from_table |

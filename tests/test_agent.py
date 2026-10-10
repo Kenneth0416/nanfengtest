@@ -231,7 +231,7 @@ def test_pi_durable_engine_with_scripted_model(app, tmp_path):
 
 
 def test_shared_library_upload_dedupe_and_flags(app):
-    """Anyone uploads; checked figures are shared, the rest shared with ⚠; a second upload is caught."""
+    """Anyone uploads; checked figures are shared, the rest shared flagged; a second upload is caught."""
     from core import analytics as an
     sample = ROOT / "reference" / "samples" / "sample_bnp_paribas_q2_2025_restated.pdf"
     assert documents.duplicate_of(app.store, sample) is None
@@ -246,8 +246,8 @@ def test_shared_library_upload_dedupe_and_flags(app):
     assert dup["uploaded_by"] == "Priya" and dup["channel"] == "upload"
     up = app.store.uploads()[0]
     assert up["publisher"] == analysis["publisher"] and up["to_check"] == len(unchecked)
-    assert an.provenance(dup).startswith("🟠 Uploaded by Priya")
-    # Anyone settles a flagged figure: rejected ones leave every view, confirmed ones lose the ⚠.
+    assert an.provenance(dup).startswith("Uploaded by Priya")
+    # Anyone settles a flagged figure: rejected ones leave every view, confirmed ones lose the flag.
     rows = [r for r in app.store.flagged() if r["source_id"] == res["source_id"]]
     app.store.resolve_observation(rows[0]["rowid"], "James", keep=False)
     assert rows[0]["rowid"] not in {o["rowid"] for o in app.store.observations()}
@@ -260,13 +260,13 @@ def test_anyone_can_flag_a_number_and_it_carries_a_warning(app):
     from core import analytics as an
     from skills.market_metrics.tools import get_metric_trend
     snap = an.snapshot(app.store, "London", "vacancy_pct")
-    assert an.source_ref(app.store, snap["source_id"])["provenance"].startswith("🟠 Uploaded by")
+    assert an.source_ref(app.store, snap["source_id"])["provenance"].startswith("Uploaded by")
     app.store.flag_observation(snap["rowid"], "Doesn't match the PDF", "Sarah")
     try:
         sig = next(s for s in SignalEngine(app.store, app.config).all_signals() if s.obs_id == snap["rowid"])
         assert "Flagged by Sarah" in sig.flag
-        assert "⚠ Flagged by Sarah" in get_metric_trend(app.ctx, {"market": "London", "metric": "vacancy_pct"})["summary"]
-        assert "⚠" in app.call("generate_brief", {"format": "board"}, "Sarah")["summary"]
+        assert "Flagged by Sarah" in get_metric_trend(app.ctx, {"market": "London", "metric": "vacancy_pct"})["summary"]
+        assert "(flagged)" in app.call("generate_brief", {"format": "board"}, "Sarah")["summary"]
     finally:
         app.store.resolve_observation(snap["rowid"], "Sarah", keep=True)
     assert an.snapshot(app.store, "London", "vacancy_pct")["status"] == "ok"
@@ -373,7 +373,7 @@ def test_follow_source_checks_terms_and_picks_the_channel(app):
 def test_followed_sources_are_shared_and_remind_the_team(app, monkeypatch):
     from core import follow, library
     res = app.call("follow_source", {"source": "Savills Market Watch", "page": "<p>Research</p>"}, "Priya")
-    assert "🟠 upload-only" in res["summary"] and res["data"]["added_by"] == "Priya"
+    assert "upload-only" in res["summary"] and res["data"]["added_by"] == "Priya"
     again = app.call("follow_source", {"source": "https://www.savills.co.uk/research_articles/", "page": "<p/>"}, "James")
     assert again["data"]["already"] and "Priya already follows" in again["summary"]
     assert any(d["name"] == "Savills Market Watch" for d in follow.due_uploads(app.store))
@@ -430,7 +430,7 @@ def test_information_agent_skills_load_and_tools_are_steps(app, tmp_path):
     names = {s["name"] for s in app.call("list_skills", {})["data"]}
     assert {"check-terms", "fetch-source", "dedupe", "read-pdf", "read-table", "read-article", "map-submarkets",
             "check-figures"} <= names
-    assert "Never describe a ⚠ figure as checked" in app.call("load_skill", {"name": "check-figures"})["summary"]
+    assert "Never describe a flagged figure as checked" in app.call("load_skill", {"name": "check-figures"})["summary"]
     assert not app.call("dedupe_report", {"path": str(pdf)})["data"]["duplicate"]
     ov = app.call("pdf_overview", {"path": str(pdf)})["data"]
     assert ov["publisher"] == "Savills" and ov["period"] == "2026Q3"
@@ -747,7 +747,7 @@ def test_brief_deck_opens_with_three_to_six_slides_and_the_cover_numbers(deck_ap
         {"layout": "Title only", "title": "Our deals and market deals", "why": "2 of our deals confirmed", "notes": "n", "fill": {"table": {"table": "deals"}}},
         {"layout": "Sources", "title": "Sources", "why": "s", "notes": "n", "fill": {"body": "auto"}}]}
     deals = _slide_text(Presentation(deck_app.call("build_brief_pptx", {"format": "board", "spec": spec}, "k")["data"]["path"]).slides[1])
-    assert "8 Bishopsgate" in deals and "internal" in deals and "🟠" in deals, "our deals listed apart from market deals"
+    assert "8 Bishopsgate" in deals and "Internal" in deals and "Uploaded" in deals, "our deals listed apart from market deals"
     assert "1 Triton Square, 4th floor" not in deals, "drafts never reach the deck"
     last = _slide_text(prs.slides[-1])
     assert "Bank of England Bank Rate" in last and "verify against the original" in last
@@ -779,7 +779,7 @@ def test_brief_deck_shows_flags_and_keeps_market_talk_apart(deck_app):
         deck_app.store.add_to_brief(s.to_dict(), "priya")
     try:
         prs = Presentation(deck_app.call("build_brief_pptx", {"format": "board"}, "k")["data"]["path"])
-        assert "8.0% ⚠" in _slide_text(prs.slides[0])
+        assert "8.0% (flagged)" in _slide_text(prs.slides[0])
         assert "flagged figures, not yet checked" in _slide_text(prs.slides[-1]).lower()
         signals = _slide_text(prs.slides[4])
         body = tip.title.removeprefix("Unverified tip: ")
@@ -888,7 +888,7 @@ def test_a_spec_is_refused_for_bad_theme_layout_count_or_number(deck_app):
     refused({"theme": "navy-gold", "slides": []}, "0 slides")
 
 
-# ---------------------------------------------------------------- 🔵 internal data
+# ---------------------------------------------------------------- internal data
 def test_a_sentence_to_the_copilot_becomes_one_of_our_deals_and_later_pieces_merge(app):
     from core import internal as I
     before = len(app.store.internal_deals())
@@ -899,7 +899,7 @@ def test_a_sentence_to_the_copilot_becomes_one_of_our_deals_and_later_pieces_mer
     assert d["rent"] == "£68.00 psf" and d["term"] == "10 years" and d["submarket"] == "City Core"
     assert d["status"] == "draft" and set(d["missing"]) == {"rent_free", "counterparty", "date"}, "'just let' is not a date"
     assert d["confidentiality"] == "internal" and d["recorded_by"][0][:2] == ["Kenneth", "said to Copilot"]
-    assert "Still missing: Rent-free, Date, Counterparty" in out["summary"] and "🔵" in out["summary"]
+    assert "Still missing: Rent-free, Date, Counterparty" in out["summary"] and "Internal only" in out["summary"]
     # a second sentence about the same property and floor fills the gaps instead of making a second record
     again = app.call("record_deal", {"text": "20 Fenchurch Street 7th floor: 18 months rent free, completed 3 Oct 2026, landlord: Land Securities"}, "Priya")
     assert again["data"]["merged"] and len(app.store.internal_deals()) == before + 1
@@ -1122,6 +1122,53 @@ def test_fewer_signals_leave_no_empty_card_frames_and_demand_is_not_a_repeat_of_
     cards = next(s for s in prs.slides if "What changed" in _slide_text(s))
     rects = [sh for sh in cards.shapes if sh.shape_type == 1 and not sh.has_text_frame or (sh.has_text_frame and not sh.text_frame.text.strip() and sh.shape_type == 1)]
     assert len(rects) >= 6  # 2 tone edges + 4 covers over the unused frames
+
+
+def test_a_cover_never_shows_empty_kpi_rules_or_placeholder_wording(deck_app, tmp_path):
+    """Reviewer finding: Copilot-planned covers showed four gold rules with no numbers, and internal text
+    ("Top team signals (none added yet)") leaked onto the cover. With no team signals the subtitle is the
+    brief's format and period; a cover planned without KPIs draws no rules; with two KPIs it draws two."""
+    import re
+    from pptx import Presentation
+    from pptx.util import Inches
+    from skills.brief_deck import tools as bd
+    from skills.brief_deck.scripts import build_deck, check_deck
+    d = bd.deck_data(deck_app.ctx, "board")  # deck_app has no brief items, so nothing is "chosen by" anyone
+    assert "none added yet" not in d["picked_by"] and "Board brief" in d["picked_by"] and d["date"] in d["picked_by"]
+    d["signals"], d["talk"] = [], []
+    dd = {k: v for k, v in d.items() if k not in ("stories", "focus")}
+    # a Copilot-written cover: no kpis in fill, and the old placeholder wording in the subtitle and headline
+    spec = {"theme": "navy-gold", "slides": [
+        {"layout": "Cover", "title": "Top team signals (none added yet)", "why": "c", "notes": "n",
+         "fill": {"subtitle": "Top team signals (none added yet)", "headline": ["Top team signals (none added yet)"], "caveat": "auto"}},
+        {"layout": "Chart + takeaway", "title": "Vacancy", "why": "v", "notes": "n",
+         "fill": {"chart_label": "Vacancy", "chart": {"chart": "vacancy"}, "takeaway": "Vacancy is 8.0%.", "source": "s"}},
+        {"layout": "Sources", "title": "Sources", "why": "s", "notes": "n", "fill": {"body": "auto"}}]}
+    out = build_deck.build(dd, str(tmp_path / "nokpi.pptx"), spec)
+    prs = Presentation(out["path"])
+    cover = prs.slides[0]
+    text = _slide_text(cover)
+    assert "none added yet" not in text and "Top team signals" not in text
+    assert "Board brief" in text and d["date"] in text and d["title"] in text
+    assert not [sh for sh in cover.shapes if re.fullmatch(r"kpi rule \d", sh.name)], "no rules drawn for a cover without KPIs"
+    assert any(sh.name == "kpi rule mask" for sh in cover.shapes), "the layout's four rules are masked"
+    problems = check_deck.check(out["path"], dd)["problems"]
+    assert not [p for p in problems if "cover" in p], problems
+    # check_deck reports the old behaviour: an unmasked cover rule with nothing under it, and the placeholder phrase
+    mask = next(sh for sh in cover.shapes if sh.name == "kpi rule mask")
+    mask._element.getparent().remove(mask._element)
+    sub = cover.shapes.add_textbox(Inches(0.7), Inches(1.95), Inches(6), Inches(0.4))
+    sub.text_frame.text = "Top team signals (none added yet)"
+    prs.save(str(tmp_path / "bad.pptx"))
+    bad = check_deck.check(str(tmp_path / "bad.pptx"))["problems"]
+    assert sum("KPI rule" in p and "no number" in p for p in bad) == 4 and any("placeholder wording" in p for p in bad), bad
+    # two KPIs with a value: two rules, centred, and the check is clean
+    dd2 = {**dd, "kpis": [k for k in dd["kpis"] if k["metric"] in ("vacancy_pct", "take_up_msqft")], "macro": None}
+    out2 = build_deck.build(dd2, str(tmp_path / "two.pptx"), None, "navy-gold")
+    cover2 = Presentation(out2["path"]).slides[0]
+    rules = sorted(sh.left for sh in cover2.shapes if re.fullmatch(r"kpi rule \d", sh.name))
+    assert len(rules) == 2 and rules[0] > Inches(1.5) and "8.0%" in _slide_text(cover2) and "3.10m sq ft" in _slide_text(cover2)
+    assert not [p for p in check_deck.check(out2["path"], dd2)["problems"] if "cover" in p]
 
 
 @needs_pi

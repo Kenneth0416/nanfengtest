@@ -59,7 +59,7 @@ The deck is not a fixed template. Every build starts from this week's data and d
 a slide:
 
 1. `brief_deck_data` returns everything the deck can show (headline, KPIs, chart series, signal cards,
-   market talk, 🔵 our deals, 🟠 market deals, footnotes) **and a ranked list of story candidates**
+   market talk, our deals (internal), market deals (uploaded), footnotes) **and a ranked list of story candidates**
    under `stories`. `planner.stories()` scores each candidate from the data itself: a watch rule
    crossed on the latest move, the size of the latest change, the gap to the long-term average, new
    requirements, deals recorded this week, a Bank Rate move, and the asker's focus markets. Each

@@ -30,7 +30,7 @@ class Footnotes:
             self.items.append(key)
         if source_id and self.store is not None and key not in self.channel:
             prov = an.source_ref(self.store, source_id).get("provenance", "")
-            self.channel[key] = prov.lstrip("🟢🟠 ")
+            self.channel[key] = prov
         return f"[{self.items.index(key) + 1}]"
 
     def markdown(self) -> list[str]:
@@ -77,7 +77,7 @@ def generate_brief(ctx, args):
             unit = tx.METRICS[metric]["unit"]
             chg = f"{snap['change']:+.2f}{'pp' if unit == '%' else ''} vs {an.period_label(snap['prev_period'])}"
         ref = an.source_ref(ctx.store, snap["source_id"])
-        flag = " ⚠" if snap["status"] == "flagged" else ""
+        flag = " (flagged)" if snap["status"] == "flagged" else ""
         rows.append(f"| {market} | {tx.METRICS[metric]['label']} | {tx.fmt_value(metric, snap['value'])}{flag} "
                     f"{notes.ref(ref['title'], ref['url'], snap['source_id'])} | {an.period_label(snap['period'])} | {chg} |")
         if flag:
@@ -102,7 +102,7 @@ def generate_brief(ctx, args):
             pass  # keep the rule-based headline
 
     def bullet(s):
-        arrow = {"positive": "🟢", "negative": "🔴"}.get(s.tone, "⚪")
+        arrow = {"positive": "▲", "negative": "▼"}.get(s.tone, "●")
         refs = "".join(notes.ref(e.text, e.url, e.source_id) for e in s.evidence)
         warn = f" **{s.flag}**" if s.flag else ""
         return f"- {arrow} **{s.title}**. {s.detail} {refs}{warn} _{s.why}_"
@@ -110,7 +110,7 @@ def generate_brief(ctx, args):
     title = "IC Paper - London Office Market Section" if fmt == "ic" else f"{team.get('name', 'Team')} - Weekly Brief"
     who = sorted({i["added_by"] for i in items if i.get("added_by")})
     md = [f"# {title}", f"_{date.today():%d %b %Y} · "
-          + (f"{len(sigs)} signals chosen by {', '.join(who)}_" if picked else "top team signals (none added yet)_"),
+          + (f"{len(sigs)} signals chosen by {', '.join(who)}_" if picked else "this week's top signals_"),
           "", "## Headline", headline, "", "## Key numbers", "| Market | Metric | Latest | Period | Change |",
           "|---|---|---|---|---|", *rows,
           *([""] + [f"_{f}_" for f in flagged] if flagged else []), ""]
@@ -123,13 +123,13 @@ def generate_brief(ctx, args):
     ours = I.for_brief(ctx.store, fmt)
     market = I.market_deals(ctx.store)
     if ours["ours"] or ours["filtered"] or market:
-        md += ["", "## Our deals 🔵 internal" if fmt != "ic" else "## Our deals 🔵 quotable only"]
+        md += ["", "## Our deals (Internal)" if fmt != "ic" else "## Our deals (Internal, quotable only)"]
         md += [f"- **{I.one_line(d)}**" + (f" _{d['ext']['source']} reports {d['ext']['rent']}; our record stands._"
                                             if d.get("ext") and d["ext"].get("differs") else "")
                + " [internal]" for d in ours["ours"]] or ["- None confirmed yet."]
         if ours["filtered"]:
             md.append(f"_{ours['filtered']} internal-only record(s) not included in the IC paper._")
-        md += ["", "## Market deals 🟠 agency reports"]
+        md += ["", "## Market deals (Uploaded agency reports)"]
         md += [f"- {m['text']} ({an.period_label(m['period'])}) {notes.ref(m['title'], m['url'], m['source_id'])}"
                for m in market] or ["- None in the library for the latest period."]
     if talk:

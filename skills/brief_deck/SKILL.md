@@ -40,7 +40,7 @@ spec), `layouts` (placeholders and keys), `style` (themes), `example` / `showcas
    layout", "text may overflow in takeaway", "text boxes overlap"). Fix exactly those and build again.
    Never round a figure differently or compute a new one to get past the check.
 6. **Reply** with the download link and one line per slide title. Say that market talk is unconfirmed
-   and that ⚠ figures are not yet checked, when there are any.
+   and that flagged figures are not yet checked, when there are any.
 
 ## Layouts (fill placeholders)
 

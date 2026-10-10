@@ -1,4 +1,4 @@
-"""Draws the sample 'photo' of a lease front page used by the 🔵 Internal data demo and tests.
+"""Draws the sample 'photo' of a lease front page used by the Internal data demo and tests.
 python reference/samples/make_sample_photo.py -> reference/samples/lease_front_page_8_bishopsgate.jpg"""
 from pathlib import Path
 

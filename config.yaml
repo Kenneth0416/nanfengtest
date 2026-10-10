@@ -92,7 +92,7 @@ skills:                     # agent skills (skills/<name>/SKILL.md + tools.py)
   - market_gather            # links and tips from colleagues, merging, hotness, report titles
   - info_processing          # parsing steps for the information agent (playbooks in info_skills/)
   - brief_deck               # the team brief as a 3-6 slide PowerPoint (python-pptx; Copilot writes the titles)
-  - internal_data            # 🔵 our own deals: one record from a sentence, a photo, a PDF or a spreadsheet
+  - internal_data            # our own deals: one record from a sentence, a photo, a PDF or a spreadsheet
 
 signals:
   news_window_days: 365

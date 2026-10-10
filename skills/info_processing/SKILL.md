@@ -4,5 +4,5 @@ description: Reads any incoming material for the team library (PDF reports, web 
 ---
 Pick the playbook for the material with load_skill (check-terms, fetch-source, read-pdf, read-table,
 read-article, map-submarkets, check-figures, dedupe) and follow it. Never save a figure that has not
-been through check_figures: figures that fail a check are saved with ⚠ for a person, never dropped
+been through check_figures: figures that fail a check are saved flagged for a person, never dropped
 silently and never quoted as checked.

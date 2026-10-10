@@ -1,9 +1,9 @@
 """Anyone on the team can follow a new information source. The agent checks the source's terms first:
 
-  🟢 auto    the terms allow automated collection: it joins the feeds the agent collects every day
-             (an RSS feed in full; a web page as headlines and links only)
-  🟠 upload  the terms restrict automated collection or AI use, or they could not be read: the team is
-             reminded to upload each new issue, and the agent never fetches it
+  auto    the terms allow automated collection: it joins the feeds the agent collects every day
+          (an RSS feed in full; a web page as headlines and links only)
+  upload  the terms restrict automated collection or AI use, or they could not be read: the team is
+          reminded to upload each new issue, and the agent never fetches it
 
 Followed sources are shared: everyone sees them, and everyone gets the reminders.
 The fetching (robots.txt, the page, its terms page) is done by the Pi tool `check_source_terms`
@@ -207,7 +207,7 @@ def proposal(store, src: dict, verdict: dict, cadence: str = "") -> dict:
     elif verdict.get("licence") == "Open Government Licence":
         adds = "official data series and releases"
     else:
-        adds = "news and deals in 📰 News and tips, merged with stories the team already has"
+        adds = "news and deals in News and tips, merged with stories the team already has"
     held = {s.get("publisher") for s in store.sources().values()}
     if pub and pub in held:
         adds += f" (the library already has some {pub} figures)"
@@ -228,7 +228,7 @@ def follow(store, src: dict, verdict: dict, user: str, cadence: str = "") -> dic
     store.db.commit()
     row = store.q("SELECT * FROM followed WHERE url=?", (src["url"],))[0]
     store.log("follow", user, f"followed {row['name']}: "
-              + ("🟢 collected automatically" if row["channel"] == "auto" else "🟠 the team uploads each issue")
+              + ("collected automatically" if row["channel"] == "auto" else "the team uploads each issue")
               + f" ({row['licence'].lower()})")
     return {**row, "already": False}
 

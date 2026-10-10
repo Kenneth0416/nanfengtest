@@ -74,15 +74,15 @@ def warning(row: dict | None) -> str:
     if not row or row.get("status") != "flagged":
         return ""
     who = f" by {row['flagged_by']}" if row.get("flagged_by") else ""
-    return f"⚠ Flagged{who}, not yet checked: {row.get('flag') or 'needs a second look'}"
+    return f"Flagged{who}, not yet checked: {row.get('flag') or 'needs a second look'}"
 
 
 def provenance(src: dict) -> str:
     """How a figure reached the shared library: an automatic open-data feed or a colleague's upload."""
     if src.get("channel") == "upload":
         when = (src.get("uploaded_at") or "")[:10]
-        return f"🟠 Uploaded by {src.get('uploaded_by') or 'a colleague'}" + (f" · {when}" if when else "")
-    return "🟢 Open data · collected automatically"
+        return f"Uploaded by {src.get('uploaded_by') or 'a colleague'}" + (f" · {when}" if when else "")
+    return "Open data · collected automatically"
 
 
 def source_ref(store, source_id: str) -> dict:

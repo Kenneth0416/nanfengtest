@@ -12,7 +12,7 @@ In a `title` or `statement`, `*words in asterisks*` take the theme's accent (ita
 
 | Layout | Use for | `fill` placeholders | so_what |
 |---|---|---|---|
-| **Cover** | slide 1, always | `subtitle`, `headline`, `caveat` (each may be `"auto"`), `kpis: "auto"` (four cards) | no |
+| **Cover** | slide 1, always | `subtitle`, `headline`, `caveat` (each may be `"auto"`), `kpis: "auto"` (up to four cards: a card and its rule are drawn only for a KPI with a value, centred; without `kpis` no rules appear). Internal wording such as "none added yet" never reaches a cover: it is replaced by the brief's format and period line | no |
 | **Section** | a divider in a longer IC pack | `body` | no |
 | **Statement** | one sentence for the room, full-bleed dark; at most one per deck | `statement` (or `"auto"`: the first headline sentence), `attribution` (or `"auto"`) | no |
 | **Hero number** | one figure carries the message | `hero: {"metric": ...}`, `hero_context` (optional), `chart_label`, `chart`, `source` | yes |
@@ -23,7 +23,7 @@ In a `title` or `statement`, `*words in asterisks*` take the theme's accent (ita
 | **Numbered pillars** | three implications or recommendations under 01 / 02 / 03 | `pillars`: exactly three `{"head", "body"}` | yes |
 | **Timeline** | how the market got here, or dates to watch | `steps: "auto"` (last five quarters of vacancy and take-up) or 2–5 `{"when", "head", "body"}` | yes |
 | **Signal cards** | what changed and why it matters | `cards: "auto"` (up to six), `talk: "auto"` | no |
-| **Sources** | last slide, always | `body: "auto"` (footnotes, ⚠ figures, caveat) | no |
+| **Sources** | last slide, always | `body: "auto"` (footnotes, flagged figures, caveat) | no |
 | **Title only** | a full-width table | `table` | yes |
 
 `so_what` is one sentence in a dark band above the source line: the implication for rents, values,

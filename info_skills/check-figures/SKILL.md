@@ -13,5 +13,5 @@ A figure passes only if it is in the page text, its label was printed (not infer
 plausible. Then:
 - `stage_figures` (a colleague's upload): passed figures are pre-ticked; the colleague reviews the rest.
 - `save_figures` (an automatic source): passed figures are shared as they are; the rest are shared
-  with ⚠ and go to the team's "Needs a person" queue, where anyone can mark them right or wrong.
-Never describe a ⚠ figure as checked, and never drop a figure silently.
+  flagged and go to the team's "Needs a person" queue, where anyone can mark them right or wrong.
+Never describe a flagged figure as checked, and never drop a figure silently.

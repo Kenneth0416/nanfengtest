@@ -359,7 +359,7 @@ def analyse_document(store, llm, path: str | Path) -> dict:
 def save_document(store, analysis: dict, accepted: list[int] | None = None, confirmed: list[int] | None = None,
                   user: str = "", licence: str = "", channel: str = "upload") -> dict:
     """Publish an upload to the whole team. Figures that passed every check are saved as they are; the rest
-    of the kept figures are saved flagged (usable, shown with ⚠) until anyone checks them, unless the
+    of the kept figures are saved flagged (usable, shown as flagged) until anyone checks them, unless the
     uploader already checked them here (`confirmed`). Unkept figures are dropped."""
     from .models import Observation
     period = analysis["period"]
