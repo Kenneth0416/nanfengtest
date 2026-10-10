@@ -47,7 +47,7 @@
 | 分組 | 模組 |
 |---|---|
 | 組裝和運行（4） | `app.py` 組裝、`registry.py` 按 config 載入、`skill.py` 工具定義、`bridge.py` Pi↔Python 橋 |
-| Agent 和模型（3） | `engine.py`、`pi_engine.py`（啟動 Pi、系統提示）、`llm.py` |
+| Agent 和模型（3） | `engine.py`、`pi_engine.py`（啟動 Pi、系統提示）、`llm.py` ；Copilot 回答以串流呈現：agent.ts 用 pi-durable 的 watchEvents 把 text_delta 與工具啟動事件逐行輸出，pi_engine.py 以 Popen 逐行讀取，頁面用 st.write_stream 逐字顯示，並注入少量 JS 做「跟隨輸出、上捲即停、回底再跟」的捲動|
 | 數據進入（6） | `ingest.py` 入庫、`classifier.py` 分類、`documents.py` PDF 解析與三項核對、`gather.py` 連結和 tip、`follow.py` 條款檢查和新增來源、`library.py` 更新時間和提醒 |
 | 分析（6） | `analytics.py` 序列和出處、`signals.py` 信號排序、`summary.py` 三句市場總結、`coverage.py` 覆蓋缺口、`focus.py` 個人視圖、`taxonomy.py` 市場和指標詞表 |
 | 模型和存儲（2） | `models.py` 數據類、`store.py` SQLite |

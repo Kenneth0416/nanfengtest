@@ -109,23 +109,27 @@ class PiDurableEngine:
             return False, "no MIMO_API_KEY, ANTHROPIC_API_KEY or OPENAI_API_KEY"
         return True, "ready"
 
-    def _run(self, script: str, stdin: str, role: str, request_id: str | None) -> tuple[dict, str]:
+    def _run(self, script: str, stdin: str, role: str, request_id: str | None, on_event=None) -> tuple[dict, str]:
         """One request through Pi, serialised per person. A store error resets that person's store once and
-        runs again; the answer then comes from a fresh conversation (the person is told in the engine note)."""
+        runs again; the answer then comes from a fresh conversation (the person is told in the engine note).
+        `on_event` receives each progress line ({"event": "delta"|"tool"|"tool_end"|"message_end", ...}) as it
+        arrives, so the web app can stream the answer."""
         with self._lock(role):
             try:
-                return self._run_once(script, stdin, role, request_id)
+                return self._run_once(script, stdin, role, request_id, on_event)
             except RuntimeError as e:
                 if not STORE_ERROR.search(str(e)):
                     raise
                 moved = self.reset_store(role)
                 print(f"[agent] Pi store for {role!r} would not load and was moved aside ({moved}); starting a new "
                       f"conversation", file=sys.stderr)
-                out, rid = self._run_once(script, stdin, role, None)
+                if on_event:
+                    on_event({"event": "reset"})
+                out, rid = self._run_once(script, stdin, role, None, on_event)
                 out["store_reset"] = True
                 return out, rid
 
-    def _run_once(self, script: str, stdin: str, role: str, request_id: str | None) -> tuple[dict, str]:
+    def _run_once(self, script: str, stdin: str, role: str, request_id: str | None, on_event=None) -> tuple[dict, str]:
         if self.bridge is None:
             self.bridge = ToolBridge(self.app)
         rid = request_id or uuid.uuid4().hex
@@ -144,25 +148,62 @@ class PiDurableEngine:
         limit = int(os.getenv("PI_TIMEOUT", self.app.config.get("agent", {}).get("timeout_seconds", 1800)))
         for _attempt in range(2):   # a retry with the same request ID resumes, it never re-asks
             try:
-                proc = subprocess.run(cmd, input=stdin, capture_output=True, text=True, env=env,
-                                      cwd=self.dir, timeout=limit)
+                proc, final, err = self._stream(cmd, stdin, env, limit, on_event)
             except subprocess.TimeoutExpired:  # the durable run keeps its finished steps; one resume
                 last_err = f"timeout after {limit} s"
+                if on_event:
+                    on_event({"event": "retry"})
                 continue
-            lines = [l for l in proc.stdout.splitlines() if l.startswith("{")]
-            if proc.returncode == 0 and lines:
-                out = json.loads(lines[-1])
+            if proc.returncode == 0 and final:
+                out = final
                 if out.get("failure"):  # the run settled without an answer, e.g. model_error
                     f = out["failure"]
                     raise RuntimeError(f"Pi {script} model {f.get('reason')}: {json.dumps(f.get('detail'))[:600]}")
                 return out, rid
-            err = (proc.stderr or proc.stdout).strip()
+            err = err.strip()
             # keep the head (the error itself) and the tail (where it happened) of a long stack trace
             last_err = (err if len(err) <= 1000 else err[:500] + " … " + err[-500:]) or f"exit code {proc.returncode}, no output"
         raise RuntimeError(f"Pi local run of {script} failed (not the model API): {last_err}")
 
-    def ask(self, question: str, role: str, request_id: str | None = None) -> Answer:
-        out, rid = self._run("agent.ts", question, role, request_id)
+    def _stream(self, cmd, stdin, env, limit, on_event):
+        """Run the Node script, hand each progress line to on_event as it is printed, and return
+        (process, final JSON line or None, stderr text). Raises TimeoutExpired after `limit` seconds."""
+        proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                text=True, env=env, cwd=self.dir)
+        err_box = {"text": ""}
+        reader = threading.Thread(target=lambda: err_box.__setitem__("text", proc.stderr.read()), daemon=True)
+        reader.start()
+        proc.stdin.write(stdin)
+        proc.stdin.close()
+        final, out_tail, started = None, [], time.monotonic()
+        for line in proc.stdout:
+            if time.monotonic() - started > limit:
+                proc.kill()
+                raise subprocess.TimeoutExpired(cmd, limit)
+            line = line.rstrip("\n")
+            if not line.startswith("{"):
+                out_tail.append(line)
+                continue
+            try:
+                obj = json.loads(line)
+            except json.JSONDecodeError:
+                out_tail.append(line)
+                continue
+            if "event" in obj:
+                if on_event:
+                    on_event(obj)
+            else:
+                final = obj
+        try:
+            proc.wait(timeout=max(1, limit - (time.monotonic() - started)))
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            raise
+        reader.join(timeout=5)
+        return proc, final, err_box["text"] or "\n".join(out_tail[-20:])
+
+    def ask(self, question: str, role: str, request_id: str | None = None, on_event=None) -> Answer:
+        out, rid = self._run("agent.ts", question, role, request_id, on_event)
         return Answer(out.get("answer", ""), self.bridge.pop_trace(rid),
                       f"pi-durable:{out.get('model', '')} (conversation {out.get('conversation', '')})"
                       + (" · earlier conversation could not be loaded and was set aside; this is a new one"

@@ -1201,3 +1201,30 @@ def test_flight_to_quality_is_a_signal_from_grade_a_against_overall_vacancy_and_
     schemes = app.store.q("SELECT scheme, source_id FROM pipeline")
     assert len(schemes) >= 10 and len({r["source_id"] for r in schemes}) >= 2
     assert any("Grade A" in s.title for s in eng.for_role("team", limit=40))
+
+
+@needs_pi
+def test_the_copilot_streams_its_answer_and_names_each_tool_as_it_starts(app, tmp_path):
+    """Pi Durable's event stream reaches the page: each piece of the answer and each tool start arrives as it
+    happens, and the complete Answer (text, trace) is the same as the non-streaming call gives."""
+    from core.engine import Engine
+    os.environ.update(PI_FAUX="1", PI_STORE=str(tmp_path / "pi.sqlite"), PI_CONVERSATIONS=str(tmp_path / "c.json"))
+    os.environ.pop("PI_FAUX_SCRIPT", None)
+    eng = Engine(app)
+    events = []
+    ans = eng.ask("What changed?", "Kenneth", on_event=events.append)
+    kinds = [e["event"] for e in events]
+    assert "tool" in kinds and "delta" in kinds and kinds.index("tool") < kinds.index("delta")
+    assert next(e["name"] for e in events if e["event"] == "tool") == "get_signals"
+    assert "".join(e["text"] for e in events if e["event"] == "delta") == ans.text
+    stream = eng.ask_streaming("What does Savills say about Midtown?", "Kenneth")
+    text = "".join(stream.text())
+    assert text.startswith("> **Coverage:**") and "Savills" in text and stream.error is None
+    assert stream.answer is not None and stream.answer.text == text and stream.answer.trace
+
+
+def test_without_pi_a_streaming_answer_reports_the_plain_reason(app, monkeypatch, tmp_path):
+    from core.engine import Engine, PiNotReady
+    monkeypatch.setenv("PI_ENGINE_DIR", str(tmp_path))
+    stream = Engine(app).ask_streaming("What changed?", "Kenneth")
+    assert "".join(stream.text()) == "" and isinstance(stream.error, PiNotReady)

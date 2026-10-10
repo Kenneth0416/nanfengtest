@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import hashlib
 import html
+import json
 import re
 from datetime import date
 from pathlib import Path
@@ -23,6 +24,7 @@ from pathlib import Path
 import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
+import streamlit.components.v1 as components
 
 from core import analytics as an
 from core import documents
@@ -224,8 +226,9 @@ def chart(spec: dict | None):
     st.plotly_chart(fig, width="stretch")
 
 
-def show_answer(ans):
-    st.markdown(ans.text)
+def show_answer(ans, text_done: bool = False):
+    if not text_done:
+        st.markdown(ans.text)
     for step in ans.trace:
         chart(step["result"].get("chart"))
         if step["tool"] == "build_brief_pptx" and (p := (step["result"].get("data") or {}).get("path")) and Path(p).exists():
@@ -237,6 +240,102 @@ def show_answer(ans):
         st.html("".join(chip(t, "src auto", u) for t, u in sorted(sources, key=lambda x: x[0] or "")))
     with st.expander("How I worked this out"):
         st.caption(f"Engine: {ans.engine} · tools: {', '.join(t['tool'] for t in ans.trace) or 'none'}")
+
+
+# Runs in the page itself (not in the component's iframe, which Streamlit re-creates on every rerun and
+# whose observers would die with it): the loader below writes this into a <script> on the parent document once.
+FOLLOW_CORE = r"""(function () {
+  const doc = document;
+  // Follow-the-output scrolling: a chat container scrolls with the answer while the reader is at the bottom.
+  // Scroll up to read something older and it stays put; scroll back to the bottom (or send a new question)
+  // and it follows again. State is kept per scroll container (the page, or the side panel), so each behaves alone.
+  const follow = new WeakMap();
+  const NEAR = 96;  // px from the bottom that still counts as "at the bottom"
+  function scroller(el) {
+    // the outermost scrollable ancestor: the page (section.stMain) for the Copilot page, the dialog's own
+    // scroll area for the side panel; inner blocks that merely declare overflow are skipped
+    let found = null;
+    while (el && el !== doc.body) {
+      const st = getComputedStyle(el);
+      if (/(auto|scroll)/.test(st.overflowY) && el.scrollHeight > el.clientHeight + 4) { found = el; }
+      el = el.parentElement;
+    }
+    return found || doc.querySelector("section.stMain") || doc.scrollingElement;
+  }
+  function atBottom(c) { return c.scrollHeight - c.scrollTop - c.clientHeight < NEAR; }
+  function isFollowing(c) { return follow.has(c) ? follow.get(c) : true; }
+  function latestButton(c, show) {
+    let b = c.__loaLatest;
+    if (!b) {
+      b = doc.createElement("button");
+      b.textContent = "↓ Latest";
+      b.className = "loa-latest";
+      b.style.cssText = "position:fixed;z-index:1000;border:1px solid #24557F;background:#fff;color:#24557F;"
+        + "border-radius:999px;padding:5px 14px;font-size:12px;cursor:pointer;box-shadow:0 1px 6px rgba(0,0,0,.2);display:none";
+      b.addEventListener("click", () => { follow.set(c, true); c.scrollTo({ top: c.scrollHeight, behavior: "smooth" }); b.style.display = "none"; });
+      doc.body.appendChild(b);
+      c.__loaLatest = b;
+    }
+    if (show) {  // float it over the lower middle of the container it belongs to (the page or the side panel)
+      const r = c.getBoundingClientRect();
+      b.style.left = Math.round(r.left + r.width / 2 - 40) + "px";
+      b.style.top = Math.round(Math.min(r.bottom, window.innerHeight) - 56) + "px";
+    }
+    b.style.display = show ? "inline-block" : "none";
+  }
+  doc.addEventListener("scroll", (e) => {
+    const c = e.target === doc ? doc.scrollingElement : e.target;
+    if (!c || !c.scrollHeight) { return; }
+    const nowAtBottom = atBottom(c);
+    follow.set(c, nowAtBottom);
+    if (nowAtBottom && c.__loaLatest) { c.__loaLatest.style.display = "none"; }
+  }, true);
+  const seen = new Set();
+  const observer = new MutationObserver((muts) => {
+    seen.clear();
+    for (const m of muts) {
+      const t = m.target.nodeType === 1 ? m.target : m.target.parentElement;
+      if (!t) { continue; }
+      const msg = t.closest("[data-testid='stChatMessage']");
+      if (!msg) { continue; }
+      const c = scroller(msg);
+      if (!c || seen.has(c)) { continue; }
+      seen.add(c);
+      // a new question from the reader always resumes following, wherever they had scrolled to
+      for (const n of m.addedNodes) {
+        if (n.nodeType === 1 && n.querySelector && n.querySelector("[data-testid='stChatMessageAvatarUser']")) { follow.set(c, true); }
+      }
+      if (isFollowing(c)) { c.scrollTop = c.scrollHeight; }
+      else { latestButton(c, true); }
+    }
+  });
+  observer.observe(doc.body, { childList: true, subtree: true, characterData: true });
+})();"""
+
+FOLLOW_JS = """<script>
+(function () {
+  const doc = window.parent.document;
+  if (doc.__loaFollow) { return; }
+  doc.__loaFollow = true;
+  const s = doc.createElement("script");
+  s.textContent = window.frameElement.getAttribute("data-follow");
+  doc.body.appendChild(s);
+})();
+</script>"""
+
+
+def follow_output():
+    """Install the follow-the-output scroll behaviour on every chat surface (once per page load). The code travels
+    in the iframe's srcdoc as a data attribute it reads and installs into the page itself."""
+    loader = FOLLOW_JS.replace('window.frameElement.getAttribute("data-follow")', "CODE")
+    components.html(f"<script>const CODE = {json.dumps(FOLLOW_CORE)};</script>" + loader, height=0)
+
+
+def focus_input():
+    """Put the cursor back in the chat box after an answer, so the next question needs no click."""
+    components.html("""<script>(function(){const d=window.parent.document;
+      const boxes=d.querySelectorAll("textarea[data-testid='stChatInputTextArea']");
+      const b=boxes[boxes.length-1]; if(b){b.focus();}})();</script>""", height=0)
 
 
 def my_focus() -> dict | None:
@@ -298,12 +397,22 @@ def copilot_body(full: bool = False):
                     "Fitzrovia, less macro'.")
         suggestions = PAGE_SUGGESTIONS.get(ctx["page"], team["questions"][:4])
     clicked = None
-    cols = [st] * 2
-    for i, q in enumerate(suggestions):
-        if cols[i % 2].button(q, key=f"cs{q}", width="stretch"):
-            clicked = q
+    if st.session_state[hist_key] and ctx["kind"] != "setup":
+        # once the conversation has started the examples fold into a small menu, so the thread has the room
+        with st.popover("💡 Ideas", help="Example questions for this page"):
+            for q in suggestions:
+                if st.button(q, key=f"cs{q}", width="stretch"):
+                    clicked = q
+    else:
+        cols = [st] * 2
+        for i, q in enumerate(suggestions):
+            if cols[i % 2].button(q, key=f"cs{q}", width="stretch"):
+                clicked = q
     thread = st.container()  # conversation above, input box pinned below it
-    question = st.chat_input("Ask about any London submarket…", key="copilot_input") or clicked
+    placeholder = {"setup": "Describe your job in one sentence…", "signal": "Ask about this signal…"}.get(
+        ctx["kind"], "Ask about any London submarket… (Enter sends, Shift+Enter for a new line)")
+    question = st.chat_input(placeholder, key="copilot_input", max_chars=2000) or clicked
+    follow_output()
     with thread:
         copilot_thread(hist_key, ctx, question)
 
@@ -361,21 +470,67 @@ def copilot_thread(hist_key, ctx, question):
         asked = f"{question} (About: {ctx['title']}. {ctx['detail']})" if ctx["kind"] == "signal" else question
         with st.chat_message("user"):
             st.markdown(question)
-        history = [{"role": t["role"], "content": t["content"]} for t in st.session_state[hist_key]][-6:]
         with st.chat_message("assistant"):
-            with st.spinner("Working…"):
-                try:
-                    ans = engine.ask(asked, user, history)
-                except AgentUnavailable as e:
-                    st.warning(str(e))
-                    if e.detail:
-                        with st.expander("Technical details"):
-                            st.code(e.detail, language=None)
-                    return
-            show_answer(ans)
+            ans = stream_answer(asked)
+            if ans is None:
+                return
+            show_answer(ans, text_done=True)
         st.session_state[hist_key] += [{"role": "user", "content": question},
                                        {"role": "assistant", "content": ans.text, "answer": ans}]
         app.store.log("ask", user, question, ans.text[:600])
+        focus_input()
+
+
+TOOL_WORDS = {"get_signals": "reading this week's signals", "get_metric_trend": "pulling the trend",
+              "compare_markets": "comparing submarkets", "generate_brief": "writing the brief",
+              "brief_deck_data": "reading the deck data", "build_brief_pptx": "building the slides",
+              "record_deal": "recording the deal", "list_our_deals": "listing our deals", "search_news": "searching the news"}
+
+
+def stream_answer(asked: str):
+    """Ask the Copilot and show the answer as it is written. A status line names each tool as it starts; the
+    text streams in underneath; the tools' charts, sources and download buttons follow when it is done.
+    Returns the Answer, or None after showing why there is none."""
+    if not engine.ready:
+        try:
+            engine.ask(asked, user)  # raises PiNotReady with the plain-language message
+        except AgentUnavailable as e:
+            st.warning(str(e))
+            if e.detail:
+                with st.expander("Technical details"):
+                    st.code(e.detail, language=None)
+        return None
+    status = st.status("Thinking…", expanded=False)
+    stream = engine.ask_streaming(asked, user)
+    tools = []
+
+    def pieces():
+        for e in stream.events():
+            if e["event"] == "delta":
+                yield e["text"]
+            elif e["event"] == "tool":
+                tools.append(e["name"])
+                status.update(label=f"Working: {TOOL_WORDS.get(e['name'], e['name'].replace('_', ' '))}…")
+                status.write(f"→ {e['name']}")
+            elif e["event"] == "reset":
+                status.write("Your earlier conversation could not be loaded and was set aside; starting a new one.")
+            elif e["event"] == "retry":
+                status.write("Taking longer than expected; resuming from the last checkpoint.")
+    text = st.write_stream(pieces())
+    if stream.error is not None:
+        status.update(label="Could not finish", state="error")
+        e = stream.error
+        st.warning(str(e))
+        if getattr(e, "detail", ""):
+            with st.expander("Technical details"):
+                st.code(e.detail, language=None)
+        return None
+    ans = stream.answer
+    status.update(label=f"Done · {len(tools)} tool call{'s' if len(tools) != 1 else ''}" if tools else "Done",
+                  state="complete")
+    if ans is not None and not (text or "").strip() and ans.text.strip():
+        st.markdown(ans.text)  # nothing streamed (a provider without deltas): show the whole answer at once
+    return ans
 
 
 def setup_card(p):

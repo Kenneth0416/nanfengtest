@@ -1,7 +1,9 @@
 """The one agent engine: Pi Durable. The Copilot and the information agent both run on it."""
 from __future__ import annotations
 
+import queue
 import sys
+import threading
 
 from . import coverage
 from .pi_engine import Answer, PiDurableEngine
@@ -53,6 +55,38 @@ def _plain(err: Exception) -> str:
             "Please try again later, or tell whoever runs the server.")
 
 
+class StreamingAnswer:
+    """A Copilot answer being written: events() yields {"event": "delta", "text": ...} and tool events in order;
+    when the generator finishes, `answer` holds the complete Answer (text, trace, sources) or `error` the failure."""
+
+    def __init__(self, engine: "Engine", question: str, role: str):
+        self.answer: Answer | None = None
+        self.error: Exception | None = None
+        self.coverage = coverage.note(question, engine.app.store)
+        self._q: queue.Queue = queue.Queue()
+
+        def run():
+            try:
+                self.answer = engine.ask(question, role, None, self._q.put)
+            except Exception as e:  # noqa: BLE001  (surfaced to the page as .error)
+                self.error = e
+            finally:
+                self._q.put(None)
+        threading.Thread(target=run, daemon=True, name=f"copilot-{role}").start()
+
+    def events(self):
+        if self.coverage:
+            yield {"event": "delta", "text": f"> **Coverage:** {self.coverage}\n\n"}
+        while (e := self._q.get()) is not None:
+            yield e
+
+    def text(self):
+        """Just the text pieces, for st.write_stream."""
+        for e in self.events():
+            if e["event"] == "delta":
+                yield e["text"]
+
+
 class Engine:
     def __init__(self, app):
         self.app = app
@@ -76,13 +110,21 @@ class Engine:
             print(f"[agent] Pi call failed: {str(e)[-600:]}", file=sys.stderr)
             raise AgentFailed(_plain(e), str(e)[-600:]) from None
 
-    def ask(self, question: str, role: str, history: list[dict] | None = None) -> Answer:
-        """A Copilot question. Pi keeps each person's conversation itself, so history is not passed."""
+    def ask(self, question: str, role: str, history: list[dict] | None = None, on_event=None) -> Answer:
+        """A Copilot question. Pi keeps each person's conversation itself, so history is not passed.
+        `on_event` gets each streamed piece of the answer and each tool start as it happens."""
         gap = coverage.note(question, self.app.store)
-        ans = self._run(self.pi.ask, f"{question}\n\n(Coverage note shown to the user: {gap})" if gap else question, role)
+        ans = self._run(self.pi.ask, f"{question}\n\n(Coverage note shown to the user: {gap})" if gap else question, role,
+                        None, on_event)
         if gap:
             ans.text = f"> **Coverage:** {gap}\n\n{ans.text}"
         return ans
+
+    def ask_streaming(self, question: str, role: str) -> "StreamingAnswer":
+        """The same question, answered while the person watches: Pi runs in a thread and every piece of text
+        (and each tool start) is handed over as it arrives. Iterate `.events()`; `.answer` or `.error` is set when
+        the iteration ends."""
+        return StreamingAnswer(self, question, role)
 
     def build_deck(self, fmt: str, theme: str | None, user: str) -> tuple[dict | None, Answer]:
         """The Copilot plans the deck from this week's data: reads brief_deck_data (the ranked stories), decides
