@@ -118,7 +118,7 @@ hand-curated seed figures (recall, precision, and how many pre-ticked figures we
 ## Try it in three steps
 
 ```bash
-git clone <this repository> && cd london-office-agent
+git clone https://github.com/Kenneth0416/nanfengtest.git && cd nanfengtest
 cp .env.example .env              # add MIMO_API_KEY (or an Anthropic / OpenAI key) for the Copilot; optional
 docker compose up                 # Python + Node 22 + Pi Durable in one image; then open http://localhost:8501
 ```
