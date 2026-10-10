@@ -8,10 +8,10 @@ the three jobs the brief names: stay ahead of the market, support decisions, and
 
 | Job | Where | What the team gets |
 |---|---|---|
-| **Monitor** (stay ahead, spot risks early) | 📡 Monitor | A freshness strip, the team summary and ranked "what changed" signal cards: numbers line (before → after · change), why it matters, source chips, Add to brief. Toggle **Whole team** or **For you**. Side panels: Share a link or tip, Watching for the team (rules in your own words, parsed live), Needs a person, Team activity. |
-| **Decide** (ask, compare, drill down) | 💬 Ask Copilot | Ask anything from any page (button or Ctrl+K opens a side panel; Ask Copilot in the left navigation is the full page). It knows the page you are on, or the signal you asked from. The answer streams in as the model writes it, with a status line naming each tool as it starts; the thread follows the output while you are at the bottom and stays put when you scroll up to read (a "↓ Latest" button brings you back); the cursor returns to the box after each answer. No login: the first visit asks who you are (pick a team name or type one) and the browser remembers it in a cookie, so a refresh or a bookmark brings back the same person and their last conversation. Conversations are saved under your name: History (top right of the chat) lists them to resume, New chat starts a clean one with its own context. The example questions appear only on a new chat; after an answer the Copilot offers its own follow-up questions as buttons. It answers in the language you ask in (English by default, Chinese for a Chinese question). The input box is pinned to the bottom of the page and of the side panel. Every number comes from a tool with its source. If you ask about a publisher the library has no figures from ("what does Savills say…") or an area it does not track (Shoreditch), it says so first and names the nearest covered submarket. |
-| **Report** (board and IC) | 📝 Team brief | Anyone can press ➕ Add to brief on a signal. The brief is written as a board summary or an IC paper section, with every figure footnoted to its source. Copy as Markdown, download it, or use the Slides panel (**Build slides**, then **Download .pptx**): a 3-6 slide editable PowerPoint on one of five house themes (navy-gold, editorial-cream, data-white, charcoal-amber, forest-cream) built by python-pptx from the library, with native charts, KPI tiles, so-what bands and signal cards. The storyline is not a fixed template: the Copilot reads this week's data and a ranked list of story candidates (alert lines crossed, biggest moves, gaps to the long-term average, new deals) and decides which 1-4 topics get a slide, which layout each gets and why; the why is written into the slide notes and shown under "Why these slides". Without a model a rule-picked plan from the same candidates is used and labelled as the fallback. The Copilot can also write the whole storyline on request ("make the brief into slides", "a client update deck on the forest theme"): it picks the theme and layouts and writes the titles, so-what lines and notes; any number in its text that is not in the data is refused, and a post-build check reports overflow, overlaps and leftover text so the model fixes and rebuilds. See [docs/brief-deck.md](docs/brief-deck.md). |
-| Shared data | 🗂️ Sources | One library for the whole team, three kinds of source. 🟢 Open data is collected automatically; 🟠 reports are uploaded by anyone on the team; 🔵 **internal data** is the company's own lettings, leases and valuations, recorded from a sentence to the Copilot, a photo (lease page, WhatsApp screenshot), a PDF or a spreadsheet, all through the same agent into one deal record. Pieces arrive separately and are merged by property and floor; drafts list their missing fields; the recorder confirms; each record is internal-only or quotable, and the brief lists "Our deals" apart from "Market deals" (the IC paper gets quotable records only). See [docs/internal-data.md](docs/internal-data.md). Cards for the gathering round, adding a source (the agent proposes how it will be collected after reading its terms), the information agent, and what needs a person. |
+| **Monitor** (stay ahead, spot risks early) | Monitor | A freshness strip, the team summary and ranked "what changed" signal cards: numbers line (before → after · change), why it matters, source chips, Add to brief. Toggle **Whole team** or **For you**. Side panels: Share a link or tip, Watching for the team (rules in your own words, parsed live), Needs a person, Team activity. |
+| **Decide** (ask, compare, drill down) | Ask Copilot | Ask anything from any page (button or Ctrl+K opens a side panel; Ask Copilot in the left navigation is the full page). It knows the page you are on, or the signal you asked from. The answer streams in as the model writes it, with a status line naming each tool as it starts; the thread follows the output while you are at the bottom and stays put when you scroll up to read (a "↓ Latest" button brings you back); the cursor returns to the box after each answer. No login: the first visit asks who you are (pick a team name or type one) and the browser remembers it in a cookie, so a refresh or a bookmark brings back the same person and their last conversation. Conversations are saved under your name: History (top right of the chat) lists them to resume, New chat starts a clean one with its own context. The example questions appear only on a new chat; after an answer the Copilot offers its own follow-up questions as buttons. It answers in the language you ask in (English by default, Chinese for a Chinese question). The input box is pinned to the bottom of the page and of the side panel. Every number comes from a tool with its source. If you ask about a publisher the library has no figures from ("what does Savills say…") or an area it does not track (Shoreditch), it says so first and names the nearest covered submarket. |
+| **Report** (board and IC) | Team brief | Anyone can press Add to brief on a signal. The brief is written as a board summary or an IC paper section, with every figure footnoted to its source. Copy as Markdown, download it, or use the Slides panel (**Build slides**, then **Download .pptx**): a 3-6 slide editable PowerPoint on one of five house themes (navy-gold, editorial-cream, data-white, charcoal-amber, forest-cream) built by python-pptx from the library, with native charts, KPI tiles, so-what bands and signal cards. The storyline is not a fixed template: the Copilot reads this week's data and a ranked list of story candidates (alert lines crossed, biggest moves, gaps to the long-term average, new deals) and decides which 1-4 topics get a slide, which layout each gets and why; the why is written into the slide notes and shown under "Why these slides". Without a model a rule-picked plan from the same candidates is used and labelled as the fallback. The Copilot can also write the whole storyline on request ("make the brief into slides", "a client update deck on the forest theme"): it picks the theme and layouts and writes the titles, so-what lines and notes; any number in its text that is not in the data is refused, and a post-build check reports overflow, overlaps and leftover text so the model fixes and rebuilds. See [docs/brief-deck.md](docs/brief-deck.md). |
+| Shared data | Sources | One library for the whole team, three kinds of source, each shown as a coloured dot with a text label. Open data is collected automatically; uploaded reports come from anyone on the team; **internal data** is the company's own lettings, leases and valuations, recorded from a sentence to the Copilot, a photo (lease page, WhatsApp screenshot), a PDF or a spreadsheet, all through the same agent into one deal record. Pieces arrive separately and are merged by property and floor; drafts list their missing fields; the recorder confirms; each record is internal-only or quotable, and the brief lists "Our deals" apart from "Market deals" (the IC paper gets quotable records only). See [docs/internal-data.md](docs/internal-data.md). Cards for the gathering round, adding a source (the agent proposes how it will be collected after reading its terms), the information agent, and what needs a person. |
 
 **Market aspects the brief names, and where each one lives.** Prime rents, vacancy, take-up, availability,
 requirements, investment, yields and rent-free periods are metrics in the library with a long-term average
@@ -25,45 +25,45 @@ widening gaps, news is themed (flight to quality, ESG, hybrid working, tech and 
 legal), and the Bank Rate and labour market come from open data. Submarkets follow the agency taxonomy
 (West End, City & Southbank, Docklands & Stratford and 21 submarkets, with Midtown and Fringe mapped).
 
-**Personal view without splitting the team.** "For you" is built by the agent: press ✨ Set up my focus
+**Personal view without splitting the team.** "For you" is built by the agent: press Set up my focus
 and describe your job in one sentence. The Copilot proposes submarkets, measures, how much to show,
 whose "why it matters" wording to add (investment, asset management, research or leadership) and team
 alerts set just beyond today's values. Nothing is saved until you press Apply, and Undo reverts it.
-Later tweaks are one line ("more Fitzrovia, less macro"). 👎 hides a signal for you only. The same
+Later tweaks are one line ("more Fitzrovia, less macro"). Hide (thumbs down) hides a signal for you only. The same
 steps are agent tools (`propose_setup`, `apply_setup`, `update_focus`).
 
 **One shared data library, two ways in.**
-- 🟢 **Collected automatically**: open data whose licence allows it (Bank of England, news RSS; ONS as a
+- **Open data, collected automatically**: open data whose licence allows it (Bank of England, news RSS; ONS as a
   seed snapshot). Each feed shows its licence, cadence, last run, status and next run, and anyone can press
   **Check for new data now**. The app collects on start-up when the last run is more than a day old; a
   daily timer on the server runs `main.py refresh` and `main.py gather`. Nomis, City of London, GLA, VOA, EPC and listed
   landlords' results are listed as planned feeds and are not built in this PoC.
-- 🟠 **Uploaded by the team**: agency reports whose terms bar automated collection or AI use (Knight
+- **Uploaded by the team**: agency reports whose terms bar automated collection or AI use (Knight
   Frank, Savills, BNP Paribas). Anyone uploads the PDF they can access; the agent reads and checks it.
-  Figures that pass every check are shared as they are. The rest are shared with ⚠ unless the uploader
+  Figures that pass every check are shared as they are. The rest are shared flagged unless the uploader
   ticks "I checked it", and stay usable, with the warning, until anyone settles them. The same file, or the
   same publisher and quarter, uploaded again shows "Kenneth already uploaded it on 10 Oct" and adds nothing.
-- Every figure shows how it arrived: "🟢 Open data · collected automatically" or "🟠 Uploaded by Kenneth ·
-  2026-10-10". Anyone can press **⚠ Looks wrong** on a signal to flag its number for the team. The
-  Copilot and the team brief carry the same ⚠ and channel.
-- **Needs a person** is one queue for the team: flagged figures (✓ Right / ✗ Wrong) and figures that
+- Every figure shows how it arrived: "Open data · collected automatically" or "Uploaded by Kenneth ·
+  2026-10-10". Anyone can press **Looks wrong** on a signal to flag its number for the team. The
+  Copilot and the team brief carry the same flag and channel.
+- **Needs a person** is one queue for the team: flagged figures (Right / Wrong) and figures that
   disagree between sources. Uploads, flags, checks and auto-updates all appear in team activity.
 - Monitor's **freshness bar** shows when open data last came in, the latest report and who uploaded it,
   how many items need a person, and a nudge when an expected report is probably out but nobody has
   uploaded it (`expected_reports` in config.yaml).
 
-**Anyone can follow a new source.** In 🗂️ Sources → Follow a new source, paste a link (a page, an RSS
+**Anyone can follow a new source.** In Sources → Follow a new source, paste a link (a page, an RSS
 feed, a publisher's research page) or type a name ("Savills Market Watch"), or tell the Copilot "follow
 …". The agent reads the site's robots.txt and terms first. Open Government Licence publishers and sources
-whose terms raise no objection join 🟢 Collected automatically (an RSS feed in full; a web page as
+whose terms raise no objection join Open data, collected automatically (an RSS feed in full; a web page as
 headlines and links only). If robots.txt or the terms restrict automated collection or AI use, or the
-terms cannot be read, the source becomes 🟠 upload-only: the agent never fetches it, and Monitor reminds
+terms cannot be read, the source becomes upload-only: the agent never fetches it, and Monitor reminds
 the whole team when a new issue is due. Agency and data-vendor research is treated as restricted until a
 person reads its terms (an assumption, based on Knight Frank's). The verdict shows its reason and the
 sentence from the terms it rests on. Followed sources are shared by the whole team, with who added them.
 
 **The whole team gathers, the agent files.** Anyone can drop a link or something they heard (a broker
-call, a LinkedIn post, a newsletter) into **📣 Share a link or tip** on Monitor, or just tell the Copilot
+call, a LinkedIn post, a newsletter) into **Share a link or tip** on Monitor, or just tell the Copilot
 ("I heard from a broker that…"). The agent reads the link, classifies the story, checks whether the team
 already has the same story (same companies, figures and wording) and either merges it, crediting the
 colleague, or adds it as new. A tip with no published source shows as **Unverified tip** until a link or a
@@ -79,14 +79,14 @@ PDFs, spreadsheets, open-data APIs and colleagues' tips, and it picks a playbook
 
 | Skill | For |
 |---|---|
-| check-terms | a new source: robots.txt and terms decide 🟢 automatic or 🟠 upload-only |
+| check-terms | a new source: robots.txt and terms decide automatic (open data) or upload-only |
 | fetch-source | getting a link once: page, feed, PDF or spreadsheet |
 | dedupe | the same file, the same quarter or the same story is never added twice |
 | read-pdf | agency reports, dashboards, listed landlords' results: choose pages, read them as images |
 | read-table | CSV, Excel and JSON from open-data portals |
 | read-article | news, posts and tips: classify, merge, credit, score how hot it is |
 | map-submarkets | a publisher's market names to the team's submarkets, with boundary notes |
-| check-figures | the three checks; failures are saved with ⚠ for the team's review queue |
+| check-figures | the three checks; failures are saved flagged for the team's review queue |
 
 The agent sees each skill's name and description and loads the full playbook with `load_skill` when it
 needs it, so a new kind of material is a new folder with a `SKILL.md`, not new code. Network work runs
@@ -99,7 +99,7 @@ went through. The agent is installed in the Copilot, runs every uploaded report,
 (`python main.py gather`): the team inbox, open data and new report titles. Every tool call is committed
 before it runs, so a crashed run resumes without filing anything twice.
 
-**Reading agency PDFs.** In 🗂️ Sources → Uploaded by the team, each data page is rendered to an image
+**Reading agency PDFs.** In Sources → Uploaded by the team, each data page is rendered to an image
 (about 2,500 px on the long side) and read by a vision model, together with the page's text layer, so
 tables, dashboards and charts are all read. The model returns each figure with its page, where it was
 (table, column or chart), whether its label was printed or inferred, and the words next to it. Then:
@@ -107,7 +107,7 @@ tables, dashboards and charts are all read. The model returns each figure with i
    (a chart or dashboard) or the figure is not in it, it is marked for a person, with a screenshot of the page.
 2. **Range check**: values outside a plausible range for the metric are flagged.
 3. **Source check**: figures are compared with what other publishers reported for the same period.
-Figures that pass every check are shared as they are; the others are shared with ⚠ until someone checks them.
+Figures that pass every check are shared as they are; the others are shared flagged until someone checks them.
 The PDF reader is its own setting (`vision` in config.yaml), so it can be a cheap vision model while the
 Copilot keeps its chat model. The default is Xiaomi MiMo-V2.6-Flash through its OpenAI-compatible API,
 two pages per call with JSON-schema output: `export MIMO_API_KEY=...`. Without that key PDFs use the chat
@@ -130,10 +130,10 @@ rounds still works (they are plain Python over the database) and the Copilot say
 
 > **Data notice.** The seed figures in `reference/seed/` are restated from Knight Frank's public London office
 > research so the PoC has something real to show. Knight Frank's website terms do not permit automated
-> collection or AI use of its content, which is why the app itself classifies Knight Frank as a 🟠 "upload only"
+> collection or AI use of its content, which is why the app itself classifies Knight Frank as an "upload only"
 > source and never fetches it. The seed data is therefore **for evaluating this PoC only**; a production
 > version would run on the team's own subscribed reports (uploaded by a licensed user), licensed feeds
-> (CoStar, EGi, agency data services) and the open data the 🟢 connectors collect. The BNP Paribas sample PDF
+> (CoStar, EGi, agency data services) and the open data the connectors collect. The BNP Paribas sample PDF
 > in `reference/samples/` shows the "swap the source" path working.
 
 ## Quick start without Docker
@@ -210,7 +210,7 @@ connectors/  (pluggable data sources)      skills/  (pluggable agent skills, SKI
   core/classifier.py  detects what each      watchlist_alerts   signal cards, user alert rules
   item is (figure, deal, scheme, macro,      market_brief       team brief (board / IC)
                                              brief_deck         the brief as a PowerPoint: data-driven storyline, 5 themes, 13 layouts
-                                             internal_data      🔵 our own deals: record, list, confirm, mark quotable
+                                             internal_data      our own deals: record, list, confirm, mark quotable
   news) and tags market, theme, sentiment,   report_ingest      PDF extraction + conflict check
                                              market_gather      links/tips, merge, hotness
   importance                                          │
@@ -232,6 +232,22 @@ connectors/  (pluggable data sources)      skills/  (pluggable agent skills, SKI
   then list it in `config.yaml`. The classifier decides what each item is; the connector never writes to the store.
 * **Add a skill:** create `skills/<name>/SKILL.md` (what it is for) and `tools.py` (a `TOOLS` list), then list it
   in `config.yaml`. The agent's system prompt and tool list are built from these files.
+
+## Look and feel
+
+The app follows the team's design tokens (`prototype/design-tokens.md`): slate neutrals, one navy accent
+(`#1B3A5C`) for primary buttons, links and selected states, amber (`#B9781A`) as the only highlight, and four
+low-saturation semantic colours that mean one thing each: green for open data collected automatically, amber
+for a report a colleague uploaded, blue for internal data, red for anything that needs a person. A source
+tier is always a coloured dot plus a text label, never colour alone. Light mode only, tabular numerals
+everywhere a figure appears.
+
+No emoji anywhere: icons are [Lucide](https://lucide.dev) (MIT), inlined in `core/icons.py` so nothing is
+fetched at runtime. `icon(name, size)` paints an icon in the text colour through a CSS mask, because
+`st.html` strips inline `<svg>`. Streamlit's own widgets (buttons, page links, the popover) accept only
+Material Symbols, so those use the closest Material name via `material(name)`; both are 1.75-stroke line
+icons of the same size, so the two sets read as one. The deck themes and the brief use the same words
+(Open data, Uploaded, Internal, Flagged) in place of the old coloured circles.
 
 ## Data
 

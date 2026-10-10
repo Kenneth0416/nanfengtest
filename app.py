@@ -35,6 +35,7 @@ from core import gather
 from core import library as lib
 from core import taxonomy as tx
 from core.app import App
+from core.icons import css as icons_css, icon, material, svg as icon_svg
 from core.engine import AgentUnavailable, Engine, split_follow_ups
 from core.pi_engine import Answer
 from skills.brief_deck import tools as _bd
@@ -42,7 +43,7 @@ from core.signals import SignalEngine
 from core.summary import is_tip, team_summary
 from skills.watchlist_alerts.tools import parse_rule
 
-st.set_page_config(page_title="London Office Market Agent", page_icon="🏢", layout="wide")
+st.set_page_config(page_title="London Office Market Agent", page_icon=":material/apartment:", layout="wide")
 KIND_LABEL = {"metric_move": "Market data", "vs_long_term": "vs long-term average", "news": "News",
               "pipeline": "New supply", "macro": "Macro", "data_quality": "Data check", "alert": "Your alert"}
 NOT_PEOPLE = {"auto", "cli", "scheduler", "guest", "agent", "team", "poc seed", "auto-update"}
@@ -50,56 +51,73 @@ NOT_PEOPLE = {"auto", "cli", "scheduler", "guest", "agent", "team", "poc seed", 
 # ---------------------------------------------------------------- look (from the prototype)
 st.html("""
 <style>
-:root { --navy:#24557F; --ink:#16201D; --ink2:#4B5955; --muted:#7A8783; --line:#DCE1DF; --soft:#F1F3F2;
-        --green:#2E8B57; --red:#C0392B; --amber:#B7791F; --orange:#E8891D; }
+/* Tokens from prototype/design-tokens.md: slate neutrals, navy accent, amber highlight, four semantic colours */
+:root { --bg:#F4F6F8; --surface:#FFFFFF; --sunk:#EAEEF2; --line:#D3DAE1; --ink:#0F1A2A; --ink2:#42506A; --ink3:#6B7A90;
+        --accent:#1B3A5C; --accent-soft:#E3EAF2; --amber:#B9781A; --amber-soft:#FBF1DE;
+        --open:#2E7D55; --open-soft:#E3F1E9; --upl:#B9781A; --upl-soft:#FBF1DE; --int:#2F6FBF; --int-soft:#E4EDF9;
+        --flag:#B4452E; --flag-soft:#F7E4DF;
+        --navy:var(--accent); --muted:var(--ink3); --soft:var(--sunk); --green:var(--open); --red:var(--flag); --orange:var(--upl); }
+.stApp, .stApp * { font-variant-numeric: tabular-nums; }
+.loa-ic.flag { color:var(--flag); } .loa-ic.amber { color:var(--amber); } .loa-ic.open { color:var(--open); }
+.loa-ic.int { color:var(--int); } .loa-ic.accent { color:var(--accent); } .loa-ic.muted { color:var(--ink3); }
 .loa-chip { display:inline-block; padding:2px 9px; border-radius:999px; font-size:12px; line-height:18px;
-            background:#E8ECEA; color:var(--ink2); margin:0 6px 4px 0; white-space:nowrap; }
-.loa-chip.alert { background:#FBE4E1; color:var(--red); font-weight:600; }
-.loa-chip.warn { background:#FBF0D9; color:var(--amber); font-weight:600; }
-.loa-chip.ok { background:#E3F2E9; color:var(--green); }
-.loa-chip.src { background:#fff; border:1px solid var(--line); color:var(--ink2); }
-.loa-chip.src::before { content:""; display:inline-block; width:7px; height:7px; border-radius:50%;
-                        background:var(--orange); margin-right:6px; vertical-align:1px; }
-.loa-chip.src.auto::before { background:var(--green); }
+            background:var(--sunk); color:var(--ink2); margin:0 6px 4px 0; white-space:nowrap; }
+.loa-chip.alert { background:var(--flag-soft); color:var(--flag); font-weight:600; }
+.loa-chip.warn { background:var(--amber-soft); color:var(--amber); font-weight:600; }
+.loa-chip.ok { background:var(--open-soft); color:var(--open); }
+.loa-chip.src { background:var(--surface); border:1px solid var(--line); color:var(--ink2); }
+.loa-chip.src::before { content:""; display:inline-block; width:8px; height:8px; border-radius:50%;
+                        background:var(--upl); margin-right:5px; vertical-align:0; }
+.loa-chip.src.auto::before { background:var(--open); } .loa-chip.src.int::before { background:var(--int); }
+.loa-chip.int { background:var(--int-soft); color:var(--int); font-weight:600; }
 a.loa-chip { text-decoration:none; }
-.loa-kicker { font-size:11px; letter-spacing:.08em; text-transform:uppercase; color:var(--muted); font-weight:600; }
-.loa-num { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-weight:700; font-size:15px; color:var(--ink); }
+/* source tier: always a coloured dot and a text label */
+.loa-tier { display:inline-flex; align-items:center; white-space:nowrap; }
+.loa-tier::before { content:""; display:inline-block; width:8px; height:8px; border-radius:50%; margin-right:4px; background:var(--upl); }
+.loa-tier.open::before { background:var(--open); } .loa-tier.int::before { background:var(--int); }
+.loa-tier.flag::before { background:var(--flag); }
+.sb { display:inline-block; font-size:11px; font-weight:600; letter-spacing:.04em; text-transform:uppercase; line-height:16px;
+      border:1px solid currentColor; border-radius:3px; padding:0 5px; margin-left:4px; vertical-align:1px; }
+.sb.fresh { color:var(--open); } .sb.stale { color:var(--amber); } .sb.verified { color:var(--accent); }
+.loa-kicker { font-size:11px; letter-spacing:.08em; text-transform:uppercase; color:var(--ink3); font-weight:600; }
+.loa-num { font-family:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,monospace; font-weight:600; font-size:15px; color:var(--ink); }
 .loa-nums { margin:2px 0 8px 0; color:var(--ink2); font-size:14px; }
 .loa-dir { display:inline-flex; width:26px; height:26px; border-radius:50%; align-items:center; justify-content:center;
            font-weight:700; font-size:14px; margin-right:10px; vertical-align:middle; }
-.loa-dir.pos { background:#E3F2E9; color:var(--green); } .loa-dir.neg { background:#FBE4E1; color:var(--red); }
-.loa-dir.neu { background:#E8ECEA; color:var(--ink2); } .loa-dir.alert { background:#FBF0D9; color:var(--amber); }
+.loa-dir .loa-ic { margin:0; vertical-align:0; }
+.loa-dir.pos { background:var(--open-soft); color:var(--open); } .loa-dir.neg { background:var(--flag-soft); color:var(--flag); }
+.loa-dir.neu { background:var(--sunk); color:var(--ink2); } .loa-dir.alert { background:var(--amber-soft); color:var(--amber); }
 .loa-title { font-size:17px; font-weight:700; color:var(--ink); margin:4px 0 2px 0; line-height:1.3; }
-.loa-muted { color:var(--muted); font-size:13px; } .loa-ink2 { color:var(--ink2); font-size:14px; line-height:1.5; }
-.loa-av { display:inline-flex; width:24px; height:24px; border-radius:50%; background:#E8ECEA; color:var(--ink2);
+.loa-muted { color:var(--ink3); font-size:13px; } .loa-ink2 { color:var(--ink2); font-size:14px; line-height:1.5; }
+.loa-av { display:inline-flex; width:24px; height:24px; border-radius:50%; background:var(--sunk); color:var(--ink2);
           font-size:11px; font-weight:700; align-items:center; justify-content:center; margin-right:-4px;
-          border:2px solid #fff; vertical-align:middle; }
-.loa-av.me { background:var(--navy); color:#fff; }
-.loa-h1 { font-size:30px; font-weight:800; color:var(--ink); margin:0; line-height:1.15; }
+          border:2px solid var(--surface); vertical-align:middle; }
+.loa-av.me { background:var(--accent); color:#fff; }
+.loa-h1 { font-size:30px; font-weight:700; color:var(--ink); margin:0; line-height:1.15; letter-spacing:-.01em; }
 .loa-sub { color:var(--ink2); font-size:15px; margin:4px 0 10px 0; }
 .loa-fresh { display:flex; flex-wrap:wrap; gap:6px 18px; font-size:13px; color:var(--ink2); padding:8px 0 4px 0;
              border-top:1px solid var(--line); border-bottom:1px solid var(--line); margin-bottom:6px; }
 .loa-fresh b { color:var(--ink); }
 .loa-big { font-size:20px; font-weight:700; color:var(--ink); margin:2px 0 6px 0; }
 .loa-h2 { font-size:19px; font-weight:700; color:var(--ink); margin:6px 0 2px 0; }
-.loa-badge { display:inline-block; background:var(--red); color:#fff; border-radius:999px; font-size:11px;
+.loa-badge { display:inline-block; background:var(--flag); color:#fff; border-radius:999px; font-size:11px;
              font-weight:700; padding:1px 7px; margin-left:6px; vertical-align:middle; }
-.loa-dot { display:inline-block; width:9px; height:9px; border-radius:50%; margin-right:8px; vertical-align:1px; }
-.loa-dot.red { background:var(--red); } .loa-dot.green { background:var(--green); }
-.loa-dot.orange { background:var(--orange); } .loa-dot.amber { background:var(--amber); }
-.loa-dot.blue { background:#2F6FDE; } .loa-chip.src.int::before { background:#2F6FDE; }
-.loa-chip.int { background:#E6EEFC; color:#1F4FA8; font-weight:600; }
-.loa-deal { border:1px solid var(--line); border-left:3px solid #2F6FDE; border-radius:6px; padding:10px 14px; background:#fff; margin:6px 0; }
+.loa-dot { display:inline-block; width:8px; height:8px; border-radius:50%; margin-right:6px; vertical-align:1px; }
+.loa-dot.red { background:var(--flag); } .loa-dot.green { background:var(--open); }
+.loa-dot.orange { background:var(--upl); } .loa-dot.amber { background:var(--amber); } .loa-dot.blue { background:var(--int); }
+.loa-deal { border:1px solid var(--line); border-left:3px solid var(--int); border-radius:6px; padding:10px 14px; background:var(--surface); margin:6px 0; }
 .loa-fields { display:grid; grid-template-columns:repeat(auto-fill,minmax(150px,1fr)); gap:6px 12px; font-size:13px; margin-top:6px; }
 .loa-fields small { display:block; color:var(--ink3); font-size:11px; text-transform:uppercase; letter-spacing:.04em; }
 .loa-fields .empty { color:var(--amber); font-style:italic; }
-.loa-banner { background:#E3F2E9; border-radius:10px; padding:12px 16px; color:var(--ink2); font-size:14px; }
-.loa-box { background:var(--soft); border-radius:8px; padding:8px 12px; margin:4px 0; }
-.loa-box .k { font-size:10px; letter-spacing:.08em; text-transform:uppercase; color:var(--muted); font-weight:600; }
+.loa-banner { background:var(--accent-soft); border-radius:6px; padding:12px 16px; color:var(--ink2); font-size:14px; }
+.loa-box { background:var(--sunk); border-radius:6px; padding:8px 12px; margin:4px 0; }
+.loa-box .k { font-size:10px; letter-spacing:.08em; text-transform:uppercase; color:var(--ink3); font-weight:600; }
 .loa-box .v { font-size:15px; font-weight:600; color:var(--ink); }
 .loa-prose { font-size:16px; line-height:1.55; color:var(--ink); }
-.loa-team { border:1px solid var(--line); border-radius:10px; padding:12px 14px; font-size:13px; color:var(--ink2); }
+.loa-team { border:1px solid var(--line); border-radius:6px; padding:12px 14px; font-size:13px; color:var(--ink2); background:var(--surface); }
 .loa-team b { color:var(--ink); font-size:14px; }
+.loa-brand { display:flex; align-items:center; gap:8px; font-size:17px; font-weight:700; color:var(--ink); margin:4px 0 2px 0; }
+.loa-brand .loa-ic { margin:0; color:var(--accent); }
 /* Copilot side panel: the input box stays at the bottom of the panel while the conversation scrolls above it */
 div[data-testid="stDialog"] section > div { display:flex; flex-direction:column; }
 div[data-testid="stDialog"] section > div > div[data-testid="stVerticalBlock"],
@@ -110,6 +128,7 @@ div[data-testid="stDialog"] .stElementContainer:has(> .stChatInput) { position:s
   background:#fff; padding:8px 0 20px 0; z-index:5; }
 </style>
 """)
+st.html(f"<style>{icons_css()}</style>")  # the icons themselves (CSS masks: st.html strips inline <svg>)
 
 
 def esc(x) -> str:
@@ -123,6 +142,16 @@ def chip(text, kind="", href="") -> str:
 
 def kicker(text) -> str:
     return f'<div class="loa-kicker">{esc(text)}</div>'
+
+
+def tier(kind: str, label: str) -> str:
+    """A source tier shown as a coloured dot plus its text label: open (data collected automatically),
+    upl (a report uploaded by a colleague), int (internal data) or flag (needs a person)."""
+    return f'<span class="loa-tier {kind}">{esc(label)}</span>'
+
+
+def ic(name: str, size: int = 16, cls: str = "") -> str:
+    return icon(name, size, cls)
 
 
 def avatars(names, me="") -> str:
@@ -253,7 +282,7 @@ def when(ts: str) -> str:
 def sidebar():
     global user
     with st.sidebar:
-        st.markdown("### 🏢 London Office Market Agent")
+        st.html(f'<div class="loa-brand">{ic("building", 20)}London Office Market Agent</div>')
         st.caption("Proof of concept · live data library")
         user = st.text_input("Your name", key="me",
                              help="Used for your own 'For you' view and to show the team who added what").strip() or "Guest"
@@ -265,12 +294,12 @@ def sidebar():
             st.session_state["me_cleared"] = True
         remember_me()
         st.html(kicker("Work"))
-        st.page_link(PAGE_OBJ["monitor"], label="Monitor", icon="📡", help="Stay ahead of the market")
-        st.page_link(PAGE_OBJ["copilot"], label="Ask Copilot", icon="💬", help="Judge: ask, compare, drill down")
+        st.page_link(PAGE_OBJ["monitor"], label="Monitor", icon=material("activity"), help="Stay ahead of the market")
+        st.page_link(PAGE_OBJ["copilot"], label="Ask Copilot", icon=material("message-square"), help="Judge: ask, compare, drill down")
         st.page_link(PAGE_OBJ["brief"], label=f"Team brief · {brief_count}" if brief_count else "Team brief",
-                     icon="📝", help="Report: board and IC outputs")
+                     icon=material("file-text"), help="Report: board and IC outputs")
         st.page_link(PAGE_OBJ["sources"], label=f"Sources · {to_check} to check" if to_check else "Sources",
-                     icon="🗂️", help="Data the agent maintains")
+                     icon=material("database"), help="Data the agent maintains")
         st.html(f"""{kicker("Team")}
 <div class="loa-team"><b>{esc(team['name'])}</b><div style="margin:6px 0 8px 0">{avatars(colleagues(), user)}</div>
 One workspace and one set of data. Each person sets their own focus.<br><br>
@@ -293,7 +322,7 @@ def page_header(title: str, subtitle: str, extra: tuple | None = None):
         label, key, target = extra
         if c[1].button(label, key=key, width="stretch"):
             goto(target)
-    if c[-1].button("💬 Ask Copilot", shortcut="ctrl+k", type="primary", width="stretch", key=f"ask_{title[:8]}",
+    if c[-1].button("Ask Copilot", icon=material("message-square"), shortcut="ctrl+k", type="primary", width="stretch", key=f"ask_{title[:8]}",
                     help="Shortcut: Ctrl+K"):
         open_copilot()
 
@@ -304,12 +333,12 @@ def chart(spec: dict | None):
     fig = go.Figure()
     for s in spec["series"]:
         if spec["type"] == "bar":
-            fig.add_bar(x=spec["x"], y=s["values"], name=s["name"], marker_color="#24557F")
+            fig.add_bar(x=spec["x"], y=s["values"], name=s["name"], marker_color="#1B3A5C")
         else:
             fig.add_scatter(x=spec["x"], y=s["values"], name=s["name"], mode="lines+markers",
                             line_shape="hv" if spec["type"] == "step" else "linear",
-                            line=dict(dash="dot", color="#7A8783") if s["name"] == "Long-term average"
-                            else dict(color="#24557F"))
+                            line=dict(dash="dot", color="#6B7A90") if s["name"] == "Long-term average"
+                            else dict(color="#1B3A5C"))
     fig.update_layout(title=spec["title"], yaxis_title=spec.get("unit", ""), height=300,
                       margin=dict(l=10, r=10, t=40, b=10), legend=dict(orientation="h"),
                       paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)")
@@ -340,7 +369,7 @@ FOLLOW_CORE = r"""(function () {
   // Scroll up to read something older and it stays put; scroll back to the bottom (or send a new question)
   // and it follows again. State is kept per scroll container (the page, or the side panel), so each behaves alone.
   const follow = new WeakMap();
-  const NEAR = 96;  // px from the bottom that still counts as "at the bottom"
+  const NEAR = 48;  // px from the bottom that still counts as "at the bottom"
   function scroller(el) {
     // the outermost scrollable ancestor: the page (section.stMain) for the Copilot page, the dialog's own
     // scroll area for the side panel; inner blocks that merely declare overflow are skipped
@@ -358,9 +387,9 @@ FOLLOW_CORE = r"""(function () {
     let b = c.__loaLatest;
     if (!b) {
       b = doc.createElement("button");
-      b.textContent = "↓ Latest";
+      b.innerHTML = ARROW + " Jump to latest";
       b.className = "loa-latest";
-      b.style.cssText = "position:fixed;z-index:1000;border:1px solid #24557F;background:#fff;color:#24557F;"
+      b.style.cssText = "position:fixed;z-index:1000;border:1px solid #1B3A5C;background:#fff;color:#1B3A5C;display:inline-flex;align-items:center;gap:4px;"
         + "border-radius:999px;padding:5px 14px;font-size:12px;cursor:pointer;box-shadow:0 1px 6px rgba(0,0,0,.2);display:none";
       b.addEventListener("click", () => { follow.set(c, true); c.scrollTo({ top: c.scrollHeight, behavior: "smooth" }); b.style.display = "none"; });
       doc.body.appendChild(b);
@@ -368,7 +397,7 @@ FOLLOW_CORE = r"""(function () {
     }
     if (show) {  // float it over the lower middle of the container it belongs to (the page or the side panel)
       const r = c.getBoundingClientRect();
-      b.style.left = Math.round(r.left + r.width / 2 - 40) + "px";
+      b.style.left = Math.round(r.left + r.width / 2 - 60) + "px";
       b.style.top = Math.round(Math.min(r.bottom, window.innerHeight) - 56) + "px";
     }
     b.style.display = show ? "inline-block" : "none";
@@ -400,6 +429,16 @@ FOLLOW_CORE = r"""(function () {
     }
   });
   observer.observe(doc.body, { childList: true, subtree: true, characterData: true });
+  // "/" anywhere outside a text box puts the cursor in the Copilot's input (Ctrl+K opens the side panel)
+  doc.addEventListener("keydown", (e) => {
+    if (e.key !== "/" || e.ctrlKey || e.metaKey || e.altKey) { return; }
+    const t = e.target;
+    if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)) { return; }
+    const boxes = doc.querySelectorAll("textarea[data-testid='stChatInputTextArea']");
+    if (!boxes.length) { return; }
+    e.preventDefault();
+    boxes[boxes.length - 1].focus();
+  });
 })();"""
 
 FOLLOW_JS = """<script>
@@ -417,8 +456,9 @@ FOLLOW_JS = """<script>
 def follow_output():
     """Install the follow-the-output scroll behaviour on every chat surface (once per page load). The code travels
     in the iframe's srcdoc as a data attribute it reads and installs into the page itself."""
+    core = FOLLOW_CORE.replace("ARROW", json.dumps(icon_svg("arrow-down", 14)), 1)
     loader = FOLLOW_JS.replace('window.frameElement.getAttribute("data-follow")', "CODE")
-    components.html(f"<script>const CODE = {json.dumps(FOLLOW_CORE)};</script>" + loader, height=0)
+    components.html(f"<script>const CODE = {json.dumps(core)};</script>" + loader, height=0)
 
 
 def focus_input():
@@ -458,7 +498,7 @@ def open_copilot(context=None):
     copilot()
 
 
-@st.dialog("💬 Copilot", position="right", width="medium", on_dismiss="rerun")
+@st.dialog("Copilot", position="right", width="medium", on_dismiss="rerun")
 def copilot():
     st.session_state["_in_dialog"] = True
     copilot_body()
@@ -478,6 +518,7 @@ def copilot_body(full: bool = False, question: str | None = None, own_input: boo
         who_card(sfx)  # first visit in this browser: pick a name once, no login
         return
     chat_id, turns = current_chat()
+    turns = absorb_partial(chat_id, turns)
     head = st.columns([3.2, 1.2, 1.25, 1.25], vertical_alignment="center")
     looking = {"setup": "setting up your focus", "signal": ctx.get("title", "")}.get(
         ctx["kind"], PAGE_TITLES.get(ctx.get("page", ""), ctx.get("page", "")))
@@ -504,22 +545,30 @@ def copilot_body(full: bool = False, question: str | None = None, own_input: boo
     if not turns and intro:
         st.markdown(intro)
     thread = st.container()  # the conversation; the input box sits below it, pinned to the bottom
-    if not turns:  # the examples belong to a new chat; afterwards only the last answer's own follow-ups show
-        cols = [st] * 2
-        for i, q in enumerate(suggestions):
-            if cols[i % 2].button(q, key=f"cs{q}", width="stretch"):
-                clicked = q
-    elif turns[-1]["role"] == "assistant" and "answer" in turns[-1]:
-        _, follow_ups = split_follow_ups(turns[-1]["answer"].text)
-        if follow_ups:
-            st.html(kicker("Follow up"))
-            cols = st.columns(len(follow_ups))
-            for i, q in enumerate(follow_ups):
-                if cols[i].button(q, key=f"fu{len(turns)}_{i}", width="stretch"):
-                    clicked = q
+    sugg = st.empty()  # example questions or follow-ups go here, under the thread, but only when nothing is being asked
     if own_input:
         question = st.chat_input(chat_placeholder(ctx), key="copilot_input", max_chars=2000)
+    if not question:
+        with sugg.container():
+            if not turns:  # the examples belong to a new chat; afterwards only the last answer's own follow-ups show
+                cols = [st] * 2
+                for i, q in enumerate(suggestions):
+                    if cols[i % 2].button(q, key=f"cs{q}", width="stretch"):
+                        clicked = q
+            elif turns[-1]["role"] == "assistant" and turns[-1]["content"].endswith("*Stopped.*") and len(turns) > 1:
+                if st.button("Ask again", icon=material("refresh-cw"), key=f"again{len(turns)}"):
+                    clicked = turns[-2]["content"]
+            elif turns[-1]["role"] == "assistant" and "answer" in turns[-1]:
+                _, follow_ups = split_follow_ups(turns[-1]["answer"].text)
+                if follow_ups:
+                    st.html(kicker("Follow up"))
+                    cols = st.columns(len(follow_ups))
+                    for i, q in enumerate(follow_ups):
+                        if cols[i].button(q, key=f"fu{len(turns)}_{i}", width="stretch"):
+                            clicked = q
     question = question or clicked
+    if clicked:
+        sugg.empty()  # a question is on its way: the buttons leave the screen, as a typed question would
     follow_output()
     with thread:
         copilot_thread(turns, ctx, question)
@@ -568,11 +617,24 @@ def history_list(chat_id, sfx):
     for c in chats:
         label = (c["title"] or "Untitled")[:60]
         current = c["id"] == chat_id
-        if st.button(("● " if current else "") + label, key=f"hist_{sfx}_{c['id']}", width="stretch",
+        if st.button(label, key=f"hist_{sfx}_{c['id']}", width="stretch",
                      help=f"{c['messages']} messages", type="primary" if current else "secondary"):
             open_chat(c["id"])
             _rerun()
         st.caption(f"{when(c['updated'])} · {c['messages']} messages")
+
+
+def absorb_partial(chat_id, turns):
+    """After the reader pressed Stop (or clicked elsewhere) while an answer was streaming: keep what was
+    written, marked 'Stopped', in the chat it belonged to. Returns the turns on screen, reloaded if that chat."""
+    if partial := st.session_state.pop("partial", None):
+        app.store.add_chat_message(partial["chat"], "user", partial["q"])
+        app.store.add_chat_message(partial["chat"], "assistant", (partial["text"].rstrip() or "(nothing written yet)")
+                                   + "\n\n*Stopped.*")
+        if partial["chat"] == chat_id:
+            open_chat(chat_id)
+            return st.session_state["chat_turns"]
+    return turns
 
 
 def copilot_thread(turns, ctx, question):
@@ -598,7 +660,7 @@ def copilot_thread(turns, ctx, question):
         say("assistant", reply)
         st.session_state["undo_ready"] = True
         _rerun()
-    if st.session_state.get("undo_ready") and st.button("↩️ Undo that change", key="undo_focus"):
+    if st.session_state.get("undo_ready") and st.button("Undo that change", icon=material("undo-2"), key="undo_focus"):
         fx.undo_setup(app.store, user, st.session_state.pop("applied_setup", {}))
         st.session_state["undo_ready"] = False
         say("assistant", "Undone. Your previous view is back.")
@@ -631,7 +693,7 @@ def copilot_thread(turns, ctx, question):
         with st.chat_message("user"):
             st.markdown(question)
         with st.chat_message("assistant"):
-            ans = stream_answer(asked, ensure_chat())
+            ans = stream_answer(asked, ensure_chat(), question)
             if ans is None:
                 return
             show_answer(ans, text_done=True)
@@ -649,8 +711,10 @@ TOOL_WORDS = {"get_signals": "reading this week's signals", "get_metric_trend": 
               "record_deal": "recording the deal", "list_our_deals": "listing our deals", "search_news": "searching the news"}
 
 
-def stream_answer(asked: str, chat_id: str | None = None):
-    """Ask the Copilot (continuing the chat `chat_id`) and show the answer as it is written. A status line names each tool as it starts; the
+def stream_answer(asked: str, chat_id: str | None = None, question: str = ""):
+    """Ask the Copilot (continuing the chat `chat_id`) and show the answer as it is written. A Stop button sits
+    under the status line while it writes: pressing it keeps what has arrived (marked 'Stopped') and offers
+    'Ask again'. A status line names each tool as it starts; the
     text streams in underneath; the tools' charts, sources and download buttons follow when it is done.
     Returns the Answer, or None after showing why there is none."""
     if not engine.ready:
@@ -662,9 +726,14 @@ def stream_answer(asked: str, chat_id: str | None = None):
                 with st.expander("Technical details"):
                     st.code(e.detail, language=None)
         return None
-    status = st.status("Thinking…", expanded=False)
+    status = st.status("Reading market data…", expanded=False)
     stream = engine.ask_streaming(asked, user, chat_id)
     tools = []
+    stop = st.empty()
+    stop.button("Stop", icon=material("square"), key=f"stop_{chat_id}", type="tertiary",
+                help="Keep what has been written so far and stop")
+    st.session_state["partial"] = {"q": question or asked, "chat": chat_id, "text": ""}
+    shown = {"text": ""}
 
     held_box = {"text": "", "line_start": True}  # the tail is held back so the closing 'Follow up:' line never shows
 
@@ -690,6 +759,8 @@ def stream_answer(asked: str, chat_id: str | None = None):
                 held_box["text"] = held
                 held_box["line_start"] = (cut == 0 and held_box["line_start"]) or out.endswith("\n")
                 if out:
+                    shown["text"] += out
+                    st.session_state["partial"]["text"] = shown["text"]  # what a Stop would keep
                     yield out
             elif e["event"] == "tool":
                 tools.append(e["name"])
@@ -704,6 +775,8 @@ def stream_answer(asked: str, chat_id: str | None = None):
         # whatever was held: all of it unless it is the follow-up line (the buttons below take over)
         yield split_follow_ups(held_box["text"])[0] if held_box["text"] else ""
     text = st.write_stream(pieces_then_rest())
+    stop.empty()
+    st.session_state.pop("partial", None)  # finished: nothing to keep from a stop
     if stream.error is not None:
         status.update(label="Could not finish", state="error")
         e = stream.error
@@ -769,7 +842,7 @@ def signal_chips(s) -> str:
     if s.flag:
         out.append(chip("Check source", "warn"))
     if s.hot >= 60:
-        out.append(chip(f"🔥 Hot {s.hot}", "warn"))
+        out.append(f'<span class="loa-chip warn">{ic("flame", 12)}Hot {s.hot}</span>')
     if s.shared_by:
         out.append(chip("Shared by " + ", ".join(x["who"] for x in s.shared_by[:2]), "ok"))
     return "".join(out)
@@ -791,18 +864,18 @@ def numbers_line(s) -> str:
 
 def signal_card(s, i, lens="team"):
     in_brief = {b["id"]: b["added_by"] for b in app.store.brief_items()}
-    glyph = {"up": "↑", "down": "↓"}.get(s.direction, "→")
+    glyph = ic({"up": "arrow-up", "down": "arrow-down"}.get(s.direction, "arrow-right"), 14)
     cls = "alert" if s.kind == "alert" else {"positive": "pos", "negative": "neg"}.get(s.tone, "neu")
     if s.kind == "alert":
-        glyph = "!"
+        glyph = ic("bell", 14)
     why = esc(s.why)
     if (extra := fx.for_you(s, lens)):
         why += f' <i class="loa-muted">For you: {esc(extra)}</i>'
     if s.hot:
-        why += f'<div class="loa-muted">🔥 {esc(s.why_hot or "routine")}' \
+        why += f'<div class="loa-muted">{ic("flame", 13, "amber")}{esc(s.why_hot or "routine")}' \
                + (f" · first seen {esc(s.discovered)} UTC" if s.discovered else "") + "</div>"
     if s.flag:
-        why += f'<div class="loa-muted">⚠ {esc(s.flag)}. Anyone can settle it on Sources.</div>'
+        why += f'<div class="loa-muted">{ic("triangle-alert", 13, "flag")}{esc(s.flag)}. Anyone can settle it on Sources.</div>'
     with st.container(border=True):
         st.html(f"""
 <div style="display:flex;align-items:flex-start;gap:4px">
@@ -820,7 +893,7 @@ def signal_card(s, i, lens="team"):
         if b[0].button("Ask Copilot", key=f"ask{i}{s.id}", type="tertiary"):
             open_copilot({"kind": "signal", "title": s.title, "detail": s.detail})
         if s.id in in_brief:
-            if b[1].button("✓ In team brief", key=f"br{i}{s.id}", type="tertiary",
+            if b[1].button("In team brief", icon=material("check"), key=f"br{i}{s.id}", type="tertiary",
                            help=f"Added by {in_brief[s.id]}. Click to remove"):
                 app.store.remove_from_brief(s.id)
                 st.rerun()
@@ -828,15 +901,15 @@ def signal_card(s, i, lens="team"):
             app.store.add_to_brief(s.to_dict(), user)
             app.store.log("brief", user, f"added '{s.title}' to the team brief")
             st.rerun()
-        if b[2].button("👍", key=f"up{i}{s.id}", type="tertiary", help="Useful: rank more like this higher for you"):
+        if b[2].button("", icon=material("thumbs-up"), key=f"up{i}{s.id}", type="tertiary", help="Useful: rank more like this higher for you"):
             app.store.add_feedback(s.id, user, 1)
             st.toast("Thanks, noted.")
-        if b[3].button("👎", key=f"dn{i}{s.id}", type="tertiary", help="Not relevant to me: hide it from my views"):
+        if b[3].button("", icon=material("thumbs-down"), key=f"dn{i}{s.id}", type="tertiary", help="Not relevant to me: hide it from my views"):
             app.store.add_feedback(s.id, user, -1)
             st.toast("Hidden for you. The rest of the team still sees it.")
             st.rerun()
         if s.obs_id and not s.flag:
-            with b[4].popover("⚠ Looks wrong", help="Flag this number for the team. It stays usable with a warning "
+            with b[4].popover("Looks wrong", icon=material("triangle-alert"), help="Flag this number for the team. It stays usable with a warning "
                                                      "until someone checks it."):
                 why_txt = st.text_input("What looks wrong?", key=f"why{i}{s.id}",
                                         placeholder="Doesn't match the PDF; looks like the City figure")
@@ -851,7 +924,7 @@ def share_panel():
     """Anyone can drop in a link or something they heard. The agent files it: reads the link, classifies it,
     merges it with the same story if the team has it, credits the colleague and scores how hot it is."""
     with st.container(border=True):
-        st.html('<div class="loa-h2" style="font-size:17px">📣 Share a link or tip</div>')
+        st.html(f'<div class="loa-h2" style="font-size:17px">{ic("megaphone", 16, "accent")}Share a link or tip</div>')
         st.caption("Paste a link or write what you heard. It goes into the team inbox; the agent files it with "
                    "your name and merges it if a colleague shared the same thing.")
         with st.form("share", clear_on_submit=True, border=False):
@@ -927,7 +1000,7 @@ def needs_a_person_panel():
         st.html(f'<div class="loa-h2" style="font-size:17px">Needs a person'
                 + (f'<span class="loa-badge">{to_check}</span>' if to_check else "") + "</div>")
         st.caption("Open data arrives by itself and anyone can upload a report. When figures disagree, anyone on "
-                   "the team can settle it; until then they show with ⚠.")
+                   "the team can settle it; until then they show as flagged.")
         if not to_check:
             st.html(f'{chip("Nothing to check", "ok")}')
         for r in flagged[:3]:
@@ -935,7 +1008,7 @@ def needs_a_person_panel():
             c = st.columns([3, 1.3], vertical_alignment="center")
             c[0].html(f'<span class="loa-dot amber"></span><b style="font-size:14px">{esc(r["market"])} {esc(label)}, '
                       f'{esc(an.period_label(r["period"]))}</b><div class="loa-muted" style="margin-left:17px">'
-                      f'{esc(an.warning(r).lstrip("⚠ "))}</div>')
+                      f'{esc(an.warning(r).lstrip("⚠ ").removeprefix("Flagged: "))}</div>')
             if c[1].button(f"Keep {tx.fmt_value(r['metric'], r['value'])}", key=f"keep{r['rowid']}", width="stretch"):
                 app.store.resolve_observation(r["rowid"], user, True)
                 app.store.log("resolve", user, f"checked {r['market']} {label}: correct")
@@ -996,17 +1069,17 @@ def freshness_line():
     if news:
         parts.append(f'<span><b>News</b> {len(news)} items, checked {esc(lib.when(last["ts"]) if last else "never")}</span>')
     if to_check:
-        parts.append(f'<span>⚠ <b>{to_check} to check</b> on Sources</span>')
+        parts.append(f'<span>{ic("triangle-alert", 14, "flag")}<b>{to_check} to check</b> on Sources</span>')
     for d in due:
-        parts.append(f'<span>⏰ <b>{esc(d["publisher"])} {esc(an.period_label(d["period"]))}</b> may be out; nobody has uploaded it yet</span>')
+        parts.append(f'<span>{ic("alarm-clock", 14, "amber")}<b>{esc(d["publisher"])} {esc(an.period_label(d["period"]))}</b> may be out; nobody has uploaded it yet</span>')
     for d in fdue:
-        parts.append(f'<span>⏰ <b>{esc(d["name"])}</b> ({esc(d["cadence"])}): no issue uploaded'
+        parts.append(f'<span>{ic("alarm-clock", 14, "amber")}<b>{esc(d["name"])}</b> ({esc(d["cadence"])}): no issue uploaded'
                      + (f' since {esc(d["last"])}' if d["last"] else " yet") + "</span>")
     c = st.columns([7, 1], vertical_alignment="center") if (due or fdue) else [st]
     c[0].html(f'<div class="loa-fresh">{"".join(parts)}</div>')
     if due or fdue:
         if c[1].button("Upload it", key="due_upload", type="tertiary"):
-            goto("sources", want_lib="🟠 Uploaded reports")
+            goto("sources", want_lib=LIB_TABS[1])
 
 
 def summary_card(team_sigs):
@@ -1036,7 +1109,7 @@ def focus_row(mine):
     else:
         c[0].html('<span class="loa-kicker" style="margin-right:8px">Your focus</span>'
                   '<span class="loa-muted">not set up yet: the team view is shown</span>')
-        if c[1].button("✨ Set up my focus", type="tertiary", key="setup_focus"):
+        if c[1].button("Set up my focus", icon=material("sparkles"), type="tertiary", key="setup_focus"):
             open_copilot({"kind": "setup"})
 
 
@@ -1064,7 +1137,7 @@ def monitor_page():
             sigs, lens = signals.for_focus(user, mine), mine.get("lens", "team")
         else:
             if view == "For you":
-                st.info("You haven't set up your view yet. Press ✨ Set up my focus and describe your job in one "
+                st.info("You haven't set up your view yet. Press 'Set up my focus' and describe your job in one "
                         "sentence. Meanwhile, here is the whole team's list.")
             sigs, lens = team_sigs[:8], "team"
         if not sigs:
@@ -1086,7 +1159,7 @@ def copilot_page():
     c = st.columns([5, 1.2], vertical_alignment="center")
     c[0].html('<div class="loa-h1">Ask Copilot</div><div class="loa-sub">Judge: ask, compare, drill down. '
               'Every number comes with its source.</div>')
-    if c[1].button("✨ Set up my focus", width="stretch", key="setup_cp"):
+    if c[1].button("Set up my focus", icon=material("sparkles"), width="stretch", key="setup_cp"):
         open_copilot({"kind": "setup"})
     # The input box is made here, at page level, so Streamlit pins it to the bottom of the window.
     question = st.chat_input(chat_placeholder(st.session_state["copilot_ctx"]), key="copilot_input", max_chars=2000)
@@ -1185,7 +1258,7 @@ def deck_panel(fmt):
                     for line in st.session_state.get(key + "_slides") or []:
                         st.markdown(f"- {line}")
             for p in st.session_state.get(key + "_problems") or []:
-                st.caption("⚠ " + p)
+                st.html(f'<div class="loa-muted">{ic("triangle-alert", 13, "flag")}{esc(p)}</div>')
         elif st.session_state.get(key):
             c[3].html(chip("Theme changed", "warn")
                       + f'<div class="loa-muted">Press Build slides to get {esc(DECK_THEMES[theme].split(" · ")[0])}; '
@@ -1219,7 +1292,7 @@ def brief_page():
                                    format_func=fx.BRIEF_FORMATS.get, key="brief_fmt") or "board"
         st.caption(FORMAT_HELP[fmt])
     key = (fmt, tuple(it["id"] for it in items))
-    rewrite = row[3].button("↻ Rewrite", key="rewrite", type="tertiary")
+    rewrite = row[3].button("Rewrite", icon=material("refresh-cw"), key="rewrite", type="tertiary")
     if st.session_state.get("brief_key") != key or rewrite:
         with st.spinner("Writing the brief…"):
             st.session_state["brief"] = app.call("generate_brief", {"format": fmt}, user)["summary"]
@@ -1235,7 +1308,7 @@ def brief_page():
         st.markdown(re.sub(r"^(#{1,2}) ", lambda m: "#" * (len(m.group(1)) + 2) + " ", brief, flags=re.M))
         chart(app.call("get_metric_trend", {"market": "London", "metric": "vacancy_pct"})["chart"])
     c = st.columns([2.2, 4.8], vertical_alignment="center")
-    if c[0].button("✨ Ask Copilot for a custom deck", type="tertiary", key="deck_copilot",
+    if c[0].button("Ask Copilot for a custom deck", icon=material("sparkles"), type="tertiary", key="deck_copilot",
                    help="Say who it is for, the theme and what to cover; the Copilot writes the storyline and "
                         "checks every number against the data"):
         open_copilot({"kind": "page", "page": "brief"})
@@ -1244,11 +1317,11 @@ def brief_page():
 
 
 # ---------------------------------------------------------------- sources
-STATUS = {"verified": "✓ in page text", "image": "👁 image only", "not_found": "⚠ not in text",
-          "implausible": "⚠ outside range"}
+STATUS = {"verified": "in page text", "image": "image only", "not_found": "not in text (check)",
+          "implausible": "outside range (check)"}
 FOLLOW_EXAMPLES = ["Follow Savills Market Watch", "Landsec half-year results", "TfL station entries",
                    "https://www.costar.co.uk/news/rss"]
-LIB_TABS = ["🟢 Collected automatically", "🟠 Uploaded reports", "🔵 Internal data", "News and tips", "Definitions"]
+LIB_TABS = ["Collected automatically", "Uploaded reports", "Internal data", "News and tips", "Definitions"]
 
 
 def overview_cards():
@@ -1270,7 +1343,7 @@ def overview_cards():
                 '<div class="loa-big">Anyone can upload</div>'
                 '<div class="loa-ink2">Agency reports whose licence does not allow automated collection (Knight '
                 'Frank, Savills, BNP Paribas…). One person uploads, everyone sees it, labelled with who and when.</div>'
-                + "".join(f'<div class="loa-ink2" style="margin-top:6px">⏰ <b>{esc(d["publisher"])} '
+                + "".join(f'<div class="loa-ink2" style="margin-top:6px">{ic("alarm-clock", 14, "amber")}<b>{esc(d["publisher"])} '
                           f'{esc(an.period_label(d["period"]))}</b> may be out; nobody has uploaded it yet.</div>'
                           for d in due))
         if st.button("Upload a report", type="tertiary", key="upload_btn"):
@@ -1292,7 +1365,7 @@ def gathering_card():
     last = lib.last_auto_update(app.store)
     with st.container(border=True):
         c = st.columns([4, 1.6], vertical_alignment="center")
-        c[0].html(f'<b>🔎 Gathering round</b> <span class="loa-muted">runs daily · last '
+        c[0].html(f'<b>{ic("search", 15, "accent")}Gathering round</b> <span class="loa-muted">runs daily · last '
                   f'{esc(lib.when(last["ts"]) if last else "never")}</span>'
                   '<div class="loa-ink2">One scheduled run: process what the team shared, collect open data, look '
                   'for new agency reports by title (never downloading them), classify news.</div>')
@@ -1316,9 +1389,9 @@ def gathering_card():
 def add_source_card():
     """Anyone adds a source for the whole team. The agent checks its terms and picks the channel."""
     with st.container(border=True):
-        st.html('<b>➕ Add a source for the team</b><div class="loa-ink2">Paste a link or name what you want '
-                'followed. The agent checks its terms, then either collects it automatically (🟢) or reminds the '
-                'team to upload each new issue (🟠). Everyone gets it.</div>')
+        st.html(f'<b>{ic("plus", 15, "accent")}Add a source for the team</b><div class="loa-ink2">Paste a link or name what '
+                f'you want followed. The agent checks its terms, then either collects it automatically ({tier("open", "Open data")}) '
+                f'or reminds the team to upload each new issue ({tier("upl", "Uploaded")}). Everyone gets it.</div>')
         c = st.columns([4, 1.4, 1.3], vertical_alignment="bottom")
         src = c[0].text_input("Link or name", key="follow_src", label_visibility="collapsed",
                               placeholder="e.g. Follow Savills Market Watch, or paste a link")
@@ -1344,7 +1417,7 @@ def add_source_card():
         rows = app.store.q("SELECT * FROM followed ORDER BY ts DESC")
         if rows:
             st.html(kicker("Sources the team follows"))
-            st.dataframe(pd.DataFrame([{"Source": r["name"], "How": "🟢 automatic" if r["channel"] == "auto" else "🟠 upload",
+            st.dataframe(pd.DataFrame([{"Source": r["name"], "How": "Open data, automatic" if r["channel"] == "auto" else "Uploaded by the team",
                                         "Cadence": r["cadence"], "Why": r["licence"], "Added by": r["added_by"],
                                         "When": r["ts"][:10], "Link": r["url"]} for r in rows]),
                          width="stretch", hide_index=True,
@@ -1378,7 +1451,7 @@ def agent_card():
     n_web = len(app.store.q("SELECT 1 FROM followed WHERE channel='auto'"))
     skills = app.info_manifest()["skills"]
     with st.container(border=True):
-        st.html('<b>🤖 One information-processing agent</b><div class="loa-ink2">The same agent collects and reads '
+        st.html(f'<b>{ic("bot", 15, "accent")}One information-processing agent</b><div class="loa-ink2">The same agent collects and reads '
                 'everything: PDFs, web pages, news, spreadsheets and data feeds. It picks the skills each input '
                 'needs, so a new kind of source needs a new skill, not a new pipeline.</div><div style="margin-top:8px">'
                 + chip(f"This week: {n_pdf} PDFs") + chip(f"{n_news} news items") + chip(f"{n_feeds} data feeds")
@@ -1394,12 +1467,12 @@ def needs_a_person():
         st.caption("Shared with the whole team: anyone can settle these, and who did it shows in team activity.")
         pending = st.session_state.get("analysis")
         if pending:
-            st.warning(f"Your upload of {pending['publisher']} is read but not published yet: see 🟠 Uploaded reports.")
+            st.warning(f"Your upload of {pending['publisher']} is read but not published yet: see the Uploaded reports tab.")
         if not checks and not flagged and not pending and not deal_drafts:
             st.html(chip("Nothing to check", "ok"))
         if deal_drafts:
             mine = [d for d in deal_drafts if any(w == user for w, _, _ in d.get("recorded_by", []))]
-            with st.expander(f"🔵 {len(deal_drafts)} of our deal record(s) to confirm"
+            with st.expander(f"Internal: {len(deal_drafts)} of our deal record(s) to confirm"
                              + (f" ({len(mine)} recorded by you)" if mine else ""), expanded=bool(mine)):
                 st.caption("The recorder confirms their own record by default; anyone can, and it shows in team activity. "
                            "Drafts are never listed in the brief.")
@@ -1410,19 +1483,19 @@ def needs_a_person():
             by_source.setdefault(f["source_id"], []).append(f)
         for sid, rows in by_source.items():
             src = rows[0]
-            with st.expander(f"⚠ {len(rows)} figure(s) from {src['title'] or sid} "
+            with st.expander(f"{len(rows)} figure(s) to check from {src['title'] or sid} "
                              f"({an.provenance(src).lstrip('🟢🟠 ')})", expanded=len(by_source) == 1):
                 for r in rows:
                     c = st.columns([5, 1, 1], vertical_alignment="center")
                     c[0].markdown(f"**{r['market']} {tx.METRICS[r['metric']]['label'].lower()}** "
                                   f"{tx.fmt_value(r['metric'], r['value'])} ({an.period_label(r['period'])})  \n"
-                                  f":gray[{an.warning(r).lstrip('⚠ ')}]")
-                    if c[1].button("✓ Right", key=f"ok{r['rowid']}", help="Checked against the report: keep it"):
+                                  f":gray[{an.warning(r).lstrip('⚠ ').removeprefix('Flagged: ')}]")
+                    if c[1].button("Right", icon=material("check"), key=f"ok{r['rowid']}", help="Checked against the report: keep it"):
                         app.store.resolve_observation(r["rowid"], user, True)
                         app.store.log("resolve", user, f"checked {r['market']} {tx.METRICS[r['metric']]['label'].lower()} "
                                       f"({src['publisher']}): correct")
                         st.rerun()
-                    if c[2].button("✗ Wrong", key=f"no{r['rowid']}", help="Remove it from the library for everyone"):
+                    if c[2].button("Wrong", icon=material("x"), key=f"no{r['rowid']}", help="Remove it from the library for everyone"):
                         app.store.resolve_observation(r["rowid"], user, False)
                         app.store.log("resolve", user, f"removed {r['market']} {tx.METRICS[r['metric']]['label'].lower()} "
                                       f"({src['publisher']}): wrong")
@@ -1444,7 +1517,7 @@ def feeds_tab():
     st.caption("Open data the agent collects by itself, because the licence allows it. A daily timer on the "
                "server runs it, and the app also collects on start-up if the last run is over "
                f"{app.config.get('auto_update_hours', 24)} hours old. Planned feeds are not built in this proof of concept.")
-    if st.button("🔄 Check for new data now", key="refresh_now"):
+    if st.button("Check for new data now", icon=material("refresh-cw"), key="refresh_now"):
         with st.spinner("Collecting open data…"):
             reports = app.refresh(by=f"Auto-update (run by {user})")
         for r in reports:
@@ -1518,16 +1591,16 @@ def review_upload(analysis):
         st.html(kicker("Skills used") + "".join(chip(x) for x in analysis["steps"]))
     st.markdown(f"**{analysis['publisher']}**, period **{an.period_label(analysis['period'] or '?')}**, "
                 f"{len(cands)} figures from {analysis.get('pages', '?')} page(s), read with {analysis['method']}. "
-                f"**{passed}** passed every check; **{len(cands) - passed}** will be shared with ⚠ unless you check "
+                f"**{passed}** passed every check; **{len(cands) - passed}** will be shared as flagged unless you check "
                 "them now.")
     rows = [{"keep": True, "I checked it": False,
-             "on publish": "✓ shared" if c.get("suggest_keep", True) else "⚠ shared, to check",
+             "on publish": "shared" if c.get("suggest_keep", True) else "shared, to check",
              "page": c.get("page"), "check": STATUS.get(c.get("status"), ""),
              "market": c["market"], "as written": c["market_text"],
              "metric": tx.METRICS[c["metric"]]["label"], "value": tx.fmt_value(c["metric"], c["value"]),
              "already held": (f"{tx.fmt_value(c['metric'], c['stored']['value'])} ({c['stored']['publisher']})"
                               if c["stored"] else "-"),
-             "flags": " ".join(c["flags"]) or "✓"} for c in cands]
+             "flags": " ".join(c["flags"]) or "none"} for c in cands]
     edited = st.data_editor(pd.DataFrame(rows), disabled=[k for k in rows[0] if k not in ("keep", "I checked it")]
                             if rows else True, width="stretch", hide_index=True, key="upload_table")
     # Figures read from charts or not found in the text: show the page so a person can check by eye.
@@ -1544,7 +1617,7 @@ def review_upload(analysis):
         app.store.log("upload", user, f"uploaded {analysis['publisher']} {an.period_label(analysis['period'] or '')}: "
                       f"{res['saved']} figures added, {res['flagged']} to check")
         st.session_state.pop("analysis")
-        st.toast(f"Shared {res['saved']} figures with the team ({res['flagged']} marked ⚠).")
+        st.toast(f"Shared {res['saved']} figures with the team ({res['flagged']} flagged).")
         st.rerun()
     if c[1].button("Discard", width="stretch"):
         st.session_state.pop("analysis")
@@ -1567,14 +1640,14 @@ DEAL_IN = {"say": "Tell Copilot", "photo": "Photo", "pdf": "PDF", "xlsx": "Excel
 
 
 def deal_card(d: dict, key: str = "lib", compact: bool = False):
-    """One 🔵 record: the eight fields (missing ones marked), who recorded it, confirm / quoting toggle, originals."""
+    """One internal record: the eight fields (missing ones marked), who recorded it, confirm / quoting toggle, originals."""
     draft = d.get("status") != "confirmed"
     status = chip("Draft · fields missing" if d.get("missing") else "Draft · to confirm", "warn") if draft else chip("Confirmed", "ok")
     level = chip(I.LEVELS[d.get("confidentiality", "internal")], "int")
     fields = "".join(f'<div><small>{esc(I.LABELS[k])}</small>{esc(d[k]) if d.get(k) else "<span class=empty>missing</span>"}</div>'
                      for k in I.FIELDS if k != "property")
     by = "; ".join(f"{esc(w)} ({esc(h)}, {esc(t)})" for w, h, t in d.get("recorded_by", []))
-    ext = f'<div class="loa-box" style="margin-top:6px">⚠ {esc(d["ext"]["text"])}</div>' if d.get("ext") else ""
+    ext = f'<div class="loa-box" style="margin-top:6px">{ic("triangle-alert", 13, "flag")}{esc(d["ext"]["text"])}</div>' if d.get("ext") else ""
     st.html(f'<div class="loa-deal"><div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap">'
             f'<b>{esc(d["property"])}</b> {chip(d["submarket"]) if d.get("submarket") else ""}<span>{status} {level}</span></div>'
             f'<div class="loa-fields">{fields}</div><div class="loa-muted" style="margin-top:6px">Recorded by {by}'
@@ -1582,7 +1655,7 @@ def deal_card(d: dict, key: str = "lib", compact: bool = False):
     if compact:
         return
     c = st.columns([1.2, 1.9, 1.8, 3], vertical_alignment="center")
-    if draft and c[0].button("✓ Confirm", key=f"cf_{key}_{d['id']}", type="tertiary",
+    if draft and c[0].button("Confirm", icon=material("check"), key=f"cf_{key}_{d['id']}", type="tertiary",
                              help="The recorder (or anyone) says the record is right"):
         I.confirm(app.store, d["id"], user)
         app.store.log("internal", user, f"confirmed our record for {d['property']}")
@@ -1667,7 +1740,7 @@ def internal_tab():
                     record_file(path, {"photo": "photo", "pdf": "PDF", "xlsx": "spreadsheet"}[how], hint)
                 st.rerun()
         st.html('<div class="loa-muted" style="margin-top:4px">Any format → agent extracts a deal record → draft if fields '
-                'are missing → recorder confirms → 🔵 internal, visible to the team</div>')
+                'are missing → recorder confirms → internal, visible to the team</div>')
         if (note := st.session_state.pop("deal_note", None)):
             st.info(note)
     deals = app.store.internal_deals()
@@ -1684,8 +1757,8 @@ def sources_page():
     page_header("Sources", "Where the team's numbers come from. Open data arrives by itself; agency reports are "
                            "uploaded once, by anyone on the team, for everyone; our own deals stay internal and separate.")
     st.html(f'<div class="loa-banner"><span style="margin-right:12px">{avatars(colleagues(), user)}</span>'
-            '<b>One shared library, three kinds of source.</b> 🟢 public, collected automatically · 🟠 external reports, '
-            'uploaded · 🔵 internal, our own deals and leases, never mixed with market data. Anyone can upload, record a '
+            f'<b>One shared library, three kinds of source.</b> {tier("open", "Open data")}, public and collected automatically · '
+            f'{tier("upl", "Uploaded")} external reports · {tier("int", "Internal")}, our own deals and leases, never mixed with market data. Anyone can upload, record a '
             'deal, settle a conflict or flag a number; it all feeds Monitor, Copilot and the team brief.</div>')
     overview_cards()
     gathering_card()
@@ -1705,13 +1778,13 @@ def sources_page():
     with t[LIB_TABS[3]]:
         st.caption("Incoming news and colleagues' tips, classified by category, submarket, theme, sentiment and "
                    "importance. The same story from several outlets or colleagues is merged, with everyone credited.")
-        rows = [{"🔥": n.hot, "Story": n.title, "Category": tx.CATEGORY_LABELS.get(n.category, n.category),
+        rows = [{"Hot": n.hot, "Story": n.title, "Category": tx.CATEGORY_LABELS.get(n.category, n.category),
                  "Markets": ", ".join(n.markets[:2]), "Source": n.source,
                  "Shared by": ", ".join(f"{x['who']} ({x['how']})" for x in n.shared_by),
                  "Also reported by": ", ".join(r["source"] for r in n.also_reported),
                  "Why hot": n.why_hot, "Published": n.published} for n in app.store.news()]
         if rows:
-            st.dataframe(pd.DataFrame(rows).sort_values("🔥", ascending=False), width="stretch", hide_index=True)
+            st.dataframe(pd.DataFrame(rows).sort_values("Hot", ascending=False), width="stretch", hide_index=True)
         else:
             st.caption("No news yet.")
     with t[LIB_TABS[4]]:
@@ -1723,11 +1796,11 @@ def sources_page():
 
 # ---------------------------------------------------------------- navigation (left, like the prototype)
 PAGE_OBJ = {
-    "monitor": st.Page(monitor_page, title="Monitor", icon="📡", default=True),
-    "copilot": st.Page(copilot_page, title="Ask Copilot", icon="💬", url_path="copilot"),
-    "brief": st.Page(brief_page, title=f"Team brief · {brief_count}" if brief_count else "Team brief", icon="📝",
+    "monitor": st.Page(monitor_page, title="Monitor", icon=material("activity"), default=True),
+    "copilot": st.Page(copilot_page, title="Ask Copilot", icon=material("message-square"), url_path="copilot"),
+    "brief": st.Page(brief_page, title=f"Team brief · {brief_count}" if brief_count else "Team brief", icon=material("file-text"),
                      url_path="brief"),
-    "sources": st.Page(sources_page, title=f"Sources · {to_check} to check" if to_check else "Sources", icon="🗂️",
+    "sources": st.Page(sources_page, title=f"Sources · {to_check} to check" if to_check else "Sources", icon=material("database"),
                        url_path="sources"),
 }
 nav = st.navigation(list(PAGE_OBJ.values()), position="hidden")
