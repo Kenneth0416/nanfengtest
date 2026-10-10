@@ -18,7 +18,7 @@ import hashlib
 import html
 import json
 import re
-from datetime import date
+from datetime import date, datetime, timezone
 from pathlib import Path
 
 import pandas as pd
@@ -35,7 +35,8 @@ from core import gather
 from core import library as lib
 from core import taxonomy as tx
 from core.app import App
-from core.engine import AgentUnavailable, Engine
+from core.engine import AgentUnavailable, Engine, split_follow_ups
+from core.pi_engine import Answer
 from skills.brief_deck import tools as _bd
 from core.signals import SignalEngine
 from core.summary import is_tip, team_summary
@@ -99,6 +100,14 @@ a.loa-chip { text-decoration:none; }
 .loa-prose { font-size:16px; line-height:1.55; color:var(--ink); }
 .loa-team { border:1px solid var(--line); border-radius:10px; padding:12px 14px; font-size:13px; color:var(--ink2); }
 .loa-team b { color:var(--ink); font-size:14px; }
+/* Copilot side panel: the input box stays at the bottom of the panel while the conversation scrolls above it */
+div[data-testid="stDialog"] section > div { display:flex; flex-direction:column; }
+div[data-testid="stDialog"] section > div > div[data-testid="stVerticalBlock"],
+div[data-testid="stDialog"] section > div > div[data-testid="stVerticalBlock"] > div[data-testid="stLayoutWrapper"],
+div[data-testid="stDialog"] section > div > div[data-testid="stVerticalBlock"] > div[data-testid="stLayoutWrapper"] > div[data-testid="stVerticalBlock"]
+  { flex:1 0 auto; display:flex; flex-direction:column; }
+div[data-testid="stDialog"] .stElementContainer:has(> .stChatInput) { position:sticky; bottom:-20px; margin-top:auto;
+  background:#fff; padding:8px 0 20px 0; z-index:5; }
 </style>
 """)
 
@@ -160,9 +169,85 @@ to_check = len(checks) + len(flagged) + len(deal_drafts)
 brief_count = len(app.store.brief_items())
 
 # ---------------------------------------------------------------- sidebar (own navigation, like the prototype)
-# The name lives in the page address (?me=Kenneth), so a refresh or a bookmark keeps it.
-st.session_state.setdefault("me", st.query_params.get("me", "Guest"))
+# No login: the name lives in the page address (?me=Kenneth) and in a browser cookie, so a refresh, a bookmark or
+# a plain visit to the address brings the same person back, with their focus and their saved chats.
+st.session_state.setdefault("me", st.query_params.get("me") or st.context.cookies.get("loa_me") or "Guest")
+if next_name := st.session_state.pop("me_next", None):  # a name picked on the 'Who's asking?' card last run
+    st.session_state["me"] = next_name
 user = (st.session_state.get("me") or "Guest").strip() or "Guest"
+
+
+def remember_me():
+    """Browser side of the identity: a cookie with the name typed in the sidebar or picked on the card, read back
+    by the app on the next visit (st.context.cookies). Clearing the name in the sidebar forgets it."""
+    components.html(f"""<script>(function () {{ try {{
+  const name = {json.dumps(user if user != "Guest" else "")}, cleared = {json.dumps(bool(st.session_state.get("me_cleared")))};
+  const doc = window.parent.document;
+  if (name) doc.cookie = "loa_me=" + encodeURIComponent(name) + "; path=/; max-age=31536000; SameSite=Lax";
+  else if (cleared) doc.cookie = "loa_me=; path=/; max-age=0; SameSite=Lax";
+}} catch (e) {{}} }})();</script>""", height=0)
+
+
+def chat_owner() -> str:
+    """Whose chats are on screen: the person's name, or for a visitor without a name this browser session only."""
+    if user != "Guest":
+        return user
+    return st.session_state.setdefault("guest_id", "guest-" + hashlib.sha1(str(id(st.session_state)).encode()).hexdigest()[:8])
+
+
+def open_chat(chat_id: str | None):
+    """Put one saved chat on screen (None: a new, empty one; its row is created with the first question)."""
+    st.session_state["chat_id"] = chat_id
+    turns = []
+    for m in (app.store.chat_messages(chat_id) if chat_id else []):
+        turn = {"role": m["role"], "content": m["content"]}
+        if m["role"] == "assistant" and m["trace"]:
+            turn["answer"] = Answer(m["content"], m["trace"], m["engine"])
+        turns.append(turn)
+    st.session_state["chat_turns"] = turns
+
+
+def current_chat() -> tuple[str | None, list[dict]]:
+    """(chat id, turns) of the conversation on screen. After a refresh, or when the name changes, the person's
+    latest saved chat comes back, so nothing is lost by reloading the page."""
+    owner = chat_owner()
+    if st.session_state.get("chat_owner") != owner:
+        st.session_state["chat_owner"] = owner
+        latest = app.store.chats(owner, limit=1)
+        open_chat(latest[0]["id"] if latest else None)
+    return st.session_state.get("chat_id"), st.session_state.setdefault("chat_turns", [])
+
+
+def ensure_chat() -> str:
+    """The id of the chat on screen, creating its row for the first question. The id also names the Copilot's
+    conversation in Pi, so each chat keeps its own context and a new chat starts clean."""
+    if not st.session_state.get("chat_id"):
+        st.session_state["chat_id"] = app.store.new_chat(chat_owner())
+    return st.session_state["chat_id"]
+
+
+def say(role: str, content: str, ans: Answer | None = None):
+    """Add a turn to the conversation on screen and to the saved chat."""
+    chat_id = ensure_chat()
+    turn = {"role": role, "content": content}
+    if ans is not None:
+        turn["answer"] = ans
+    st.session_state.setdefault("chat_turns", []).append(turn)
+    app.store.add_chat_message(chat_id, role, content, ans.trace if ans else None, ans.engine if ans else "")
+
+
+def when(ts: str) -> str:
+    """A saved chat's time, short: 14:02 today, else 'Tue 14:02' this week, else '3 Oct'."""
+    try:
+        t = datetime.strptime(ts, "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc).astimezone()
+    except (TypeError, ValueError):
+        return ""
+    now = datetime.now(t.tzinfo)
+    if t.date() == now.date():
+        return t.strftime("%H:%M")
+    if (now - t).days < 7:
+        return t.strftime("%a %H:%M")
+    return t.strftime("%-d %b")
 
 
 def sidebar():
@@ -174,6 +259,11 @@ def sidebar():
                              help="Used for your own 'For you' view and to show the team who added what").strip() or "Guest"
         if user != "Guest" and st.query_params.get("me") != user:
             st.query_params["me"] = user
+            st.session_state["me_cleared"] = False
+        elif user == "Guest" and st.query_params.get("me"):
+            del st.query_params["me"]  # the name was cleared on purpose: forget it in the browser too
+            st.session_state["me_cleared"] = True
+        remember_me()
         st.html(kicker("Work"))
         st.page_link(PAGE_OBJ["monitor"], label="Monitor", icon="📡", help="Stay ahead of the market")
         st.page_link(PAGE_OBJ["copilot"], label="Ask Copilot", icon="💬", help="Judge: ask, compare, drill down")
@@ -228,7 +318,7 @@ def chart(spec: dict | None):
 
 def show_answer(ans, text_done: bool = False):
     if not text_done:
-        st.markdown(ans.text)
+        st.markdown(split_follow_ups(ans.text)[0])
     for step in ans.trace:
         chart(step["result"].get("chart"))
         if step["tool"] == "build_brief_pptx" and (p := (step["result"].get("data") or {}).get("path")) and Path(p).exists():
@@ -378,54 +468,122 @@ def _rerun():
     st.rerun(scope="fragment" if st.session_state.get("_in_dialog") else "app")
 
 
-def copilot_body(full: bool = False):
+def copilot_body(full: bool = False, question: str | None = None, own_input: bool = True):
+    """The conversation: a header with what the Copilot is looking at, History and New chat; the saved chat; the
+    example questions only while the chat is empty; the input box at the bottom (the page passes its own
+    pinned one in `question`; the side panel makes one here)."""
     ctx = st.session_state.get("copilot_ctx", {"kind": "page", "page": "monitor"})
-    hist_key = f"chat_{user}"
-    st.session_state.setdefault(hist_key, [])
+    sfx = "d" if st.session_state.get("_in_dialog") else "p"
+    if user == "Guest" and not st.session_state.get("skip_who"):
+        who_card(sfx)  # first visit in this browser: pick a name once, no login
+        return
+    chat_id, turns = current_chat()
+    head = st.columns([3.2, 1.2, 1.25, 1.25], vertical_alignment="center")
+    looking = {"setup": "setting up your focus", "signal": ctx.get("title", "")}.get(
+        ctx["kind"], PAGE_TITLES.get(ctx.get("page", ""), ctx.get("page", "")))
+    head[0].html(f'<div class="loa-box">Looking at: <b>{esc(looking)}</b></div>')
+    with head[1].popover(user if user != "Guest" else "Who?", width="stretch", help="Who is asking; change the name"):
+        who_card(sfx, compact=True)
+    with head[2].popover("History", width="stretch", help="Your saved conversations"):
+        history_list(chat_id, sfx)
+    if head[3].button("New chat", width="stretch", key=f"newchat_{sfx}", help="Start a clean conversation"):
+        open_chat(None)
+        _rerun()
     if ctx["kind"] == "setup":
-        st.html('<div class="loa-box">Looking at: <b>setting up your focus</b></div>')
-        st.markdown("Tell me what you do in one sentence and I'll set up your 'For you' view: submarkets, measures, "
-                    "how much to show and alerts. Nothing changes until you press Apply. The team view stays as it is.")
+        intro = ("Tell me what you do in one sentence and I'll set up your 'For you' view: submarkets, measures, "
+                 "how much to show and alerts. Nothing changes until you press Apply. The team view stays as it is.")
         suggestions = SETUP_EXAMPLES
     elif ctx["kind"] == "signal":
-        st.html(f'<div class="loa-box">Looking at: <b>{esc(ctx["title"])}</b></div>')
-        suggestions = SIGNAL_SUGGESTIONS
+        intro, suggestions = "", SIGNAL_SUGGESTIONS
     else:
-        st.html(f'<div class="loa-box">Looking at: <b>{esc(PAGE_TITLES.get(ctx["page"], ctx["page"]))}</b></div>')
-        st.markdown("Ask me anything about the London office market. I can see what's on your screen, and every "
-                    "number I give you comes with its source. You can also change your own view, e.g. 'more "
-                    "Fitzrovia, less macro'.")
-        suggestions = PAGE_SUGGESTIONS.get(ctx["page"], team["questions"][:4])
+        intro = ("Ask me anything about the London office market. I can see what's on your screen, and every "
+                 "number I give you comes with its source. You can also change your own view, e.g. 'more "
+                 "Fitzrovia, less macro'.")
+        suggestions = PAGE_SUGGESTIONS.get(ctx.get("page", ""), team["questions"][:4])
     clicked = None
-    if st.session_state[hist_key] and ctx["kind"] != "setup":
-        # once the conversation has started the examples fold into a small menu, so the thread has the room
-        with st.popover("💡 Ideas", help="Example questions for this page"):
-            for q in suggestions:
-                if st.button(q, key=f"cs{q}", width="stretch"):
-                    clicked = q
-    else:
+    if not turns and intro:
+        st.markdown(intro)
+    thread = st.container()  # the conversation; the input box sits below it, pinned to the bottom
+    if not turns:  # the examples belong to a new chat; afterwards only the last answer's own follow-ups show
         cols = [st] * 2
         for i, q in enumerate(suggestions):
             if cols[i % 2].button(q, key=f"cs{q}", width="stretch"):
                 clicked = q
-    thread = st.container()  # conversation above, input box pinned below it
-    placeholder = {"setup": "Describe your job in one sentence…", "signal": "Ask about this signal…"}.get(
-        ctx["kind"], "Ask about any London submarket… (Enter sends, Shift+Enter for a new line)")
-    question = st.chat_input(placeholder, key="copilot_input", max_chars=2000) or clicked
+    elif turns[-1]["role"] == "assistant" and "answer" in turns[-1]:
+        _, follow_ups = split_follow_ups(turns[-1]["answer"].text)
+        if follow_ups:
+            st.html(kicker("Follow up"))
+            cols = st.columns(len(follow_ups))
+            for i, q in enumerate(follow_ups):
+                if cols[i].button(q, key=f"fu{len(turns)}_{i}", width="stretch"):
+                    clicked = q
+    if own_input:
+        question = st.chat_input(chat_placeholder(ctx), key="copilot_input", max_chars=2000)
+    question = question or clicked
     follow_output()
     with thread:
-        copilot_thread(hist_key, ctx, question)
+        copilot_thread(turns, ctx, question)
 
 
-def copilot_thread(hist_key, ctx, question):
-    for turn in st.session_state[hist_key]:
+def who_card(sfx: str, compact: bool = False):
+    """Who's asking: pick a name once (the team's names, or type one); this browser then remembers it, with the
+    person's focus and conversations. No login."""
+    names = list(dict.fromkeys([*team.get("members", []), *colleagues()]))
+    if not compact:
+        st.html('<div class="loa-box"><b>Who\'s asking?</b><div class="loa-ink2">No login needed. Pick your name once and '
+                'this browser remembers you, your focus and your conversations.</div></div>')
+    else:
+        st.caption("Asking as " + (user if user != "Guest" else "a guest") + ". Pick another name:")
+    cols = st.columns(3) if names else []
+    for i, n in enumerate(names):
+        if cols[i % 3].button(n, key=f"who_{sfx}_{n}", width="stretch"):
+            become(n)
+    typed = st.text_input("Or type your name", key=f"who_typed_{sfx}", placeholder="Your name", label_visibility="collapsed")
+    c = st.columns(2)
+    if c[0].button("Continue", type="primary", key=f"who_go_{sfx}", width="stretch") and typed.strip():
+        become(typed.strip())
+    if not compact and c[1].button("Skip for now", key=f"who_skip_{sfx}", width="stretch"):
+        st.session_state["skip_who"] = True
+        _rerun()
+
+
+def become(name: str):
+    """Switch the person on screen; the sidebar, the address and the browser follow on the next run."""
+    st.session_state["me_next"] = name  # applied before the sidebar's name box exists on the next run
+    st.session_state["me_cleared"] = False
+    st.query_params["me"] = name
+    st.rerun()
+
+
+def chat_placeholder(ctx) -> str:
+    return {"setup": "Describe your job in one sentence…", "signal": "Ask about this signal…"}.get(
+        ctx["kind"], "Ask about any London submarket… (Enter sends, Shift+Enter for a new line)")
+
+
+def history_list(chat_id, sfx):
+    chats = app.store.chats(chat_owner())
+    if not chats:
+        st.caption("No saved conversations yet. They are kept under your name, so a refresh never loses one.")
+        return
+    for c in chats:
+        label = (c["title"] or "Untitled")[:60]
+        current = c["id"] == chat_id
+        if st.button(("● " if current else "") + label, key=f"hist_{sfx}_{c['id']}", width="stretch",
+                     help=f"{c['messages']} messages", type="primary" if current else "secondary"):
+            open_chat(c["id"])
+            _rerun()
+        st.caption(f"{when(c['updated'])} · {c['messages']} messages")
+
+
+def copilot_thread(turns, ctx, question):
+    for turn in turns:
         with st.chat_message(turn["role"]):
             if turn["role"] == "user" or "answer" not in turn:
                 st.markdown(turn["content"])
             else:
                 show_answer(turn["answer"])
     if question and ctx["kind"] == "setup":
-        st.session_state[hist_key].append({"role": "user", "content": question})
+        say("user", question)
         with st.spinner("Drafting your setup…"):
             st.session_state["proposal"] = fx.propose(question, app.store, app.llm)
         _rerun()
@@ -436,13 +594,14 @@ def copilot_thread(hist_key, ctx, question):
         app.store.save_focus(user, fx.apply(my_focus() or fx.defaults(app.config), changes))
         st.session_state.pop("applied_setup", None)  # Undo now reverts this change only
         reply = f"Done. {fx.describe(changes)} in your 'For you' view. The team view is unchanged."
-        st.session_state[hist_key] += [{"role": "user", "content": question}, {"role": "assistant", "content": reply}]
+        say("user", question)
+        say("assistant", reply)
         st.session_state["undo_ready"] = True
         _rerun()
     if st.session_state.get("undo_ready") and st.button("↩️ Undo that change", key="undo_focus"):
         fx.undo_setup(app.store, user, st.session_state.pop("applied_setup", {}))
         st.session_state["undo_ready"] = False
-        st.session_state[hist_key].append({"role": "assistant", "content": "Undone. Your previous view is back."})
+        say("assistant", "Undone. Your previous view is back.")
         _rerun()
     if question and not engine.ready and (want := _bd.deck_request(question)):
         # The Copilot is offline: a request for slides still gets a deck, picked by rules from this week's data.
@@ -458,10 +617,11 @@ def copilot_thread(hist_key, ctx, question):
                          "the choice of slides and the titles are standard.\n\n"
                          + "\n".join(f"- {line}" for line in st.session_state.get(key + "_slides") or []))
                 st.markdown(reply)
-                st.download_button("Download .pptx", st.session_state[key], key=f"dl_chat_{len(st.session_state[hist_key])}",
+                st.download_button("Download .pptx", st.session_state[key], key=f"dl_chat_{len(turns)}",
                                    file_name=f"london-office-team-brief-{fmt}-{theme}.pptx",
                                    mime="application/vnd.openxmlformats-officedocument.presentationml.presentation")
-                st.session_state[hist_key] += [{"role": "user", "content": question}, {"role": "assistant", "content": reply}]
+                say("user", question)
+                say("assistant", reply)
                 app.store.log("ask", user, question, reply[:600])
         return
     if question:
@@ -471,24 +631,26 @@ def copilot_thread(hist_key, ctx, question):
         with st.chat_message("user"):
             st.markdown(question)
         with st.chat_message("assistant"):
-            ans = stream_answer(asked)
+            ans = stream_answer(asked, ensure_chat())
             if ans is None:
                 return
             show_answer(ans, text_done=True)
-        st.session_state[hist_key] += [{"role": "user", "content": question},
-                                       {"role": "assistant", "content": ans.text, "answer": ans}]
+        say("user", question)
+        say("assistant", ans.text, ans)
         app.store.log("ask", user, question, ans.text[:600])
         focus_input()
+        _rerun()  # the thread re-renders from the saved chat: follow-up buttons, no raw 'Follow up:' line
 
 
+FOLLOW_LINE = re.compile(r"\n[ \t]*\**[ \t]*follow", re.I)  # a line that may become the closing 'Follow up:' line
 TOOL_WORDS = {"get_signals": "reading this week's signals", "get_metric_trend": "pulling the trend",
               "compare_markets": "comparing submarkets", "generate_brief": "writing the brief",
               "brief_deck_data": "reading the deck data", "build_brief_pptx": "building the slides",
               "record_deal": "recording the deal", "list_our_deals": "listing our deals", "search_news": "searching the news"}
 
 
-def stream_answer(asked: str):
-    """Ask the Copilot and show the answer as it is written. A status line names each tool as it starts; the
+def stream_answer(asked: str, chat_id: str | None = None):
+    """Ask the Copilot (continuing the chat `chat_id`) and show the answer as it is written. A status line names each tool as it starts; the
     text streams in underneath; the tools' charts, sources and download buttons follow when it is done.
     Returns the Answer, or None after showing why there is none."""
     if not engine.ready:
@@ -501,13 +663,34 @@ def stream_answer(asked: str):
                     st.code(e.detail, language=None)
         return None
     status = st.status("Thinking…", expanded=False)
-    stream = engine.ask_streaming(asked, user)
+    stream = engine.ask_streaming(asked, user, chat_id)
     tools = []
+
+    held_box = {"text": "", "line_start": True}  # the tail is held back so the closing 'Follow up:' line never shows
 
     def pieces():
         for e in stream.events():
             if e["event"] == "delta":
-                yield e["text"]
+                held = held_box["text"] + e["text"]
+                last = None
+                for last in FOLLOW_LINE.finditer(held):
+                    pass
+                if last:
+                    cut = last.start()
+                elif held_box["line_start"] and FOLLOW_LINE.match("\n" + held):
+                    cut = 0
+                else:
+                    cut = None
+                if cut is not None:
+                    out, held = held[:cut], held[cut:]
+                elif len(held) > 24:
+                    out, held = held[:-24], held[-24:]
+                else:
+                    out = ""
+                held_box["text"] = held
+                held_box["line_start"] = (cut == 0 and held_box["line_start"]) or out.endswith("\n")
+                if out:
+                    yield out
             elif e["event"] == "tool":
                 tools.append(e["name"])
                 status.update(label=f"Working: {TOOL_WORDS.get(e['name'], e['name'].replace('_', ' '))}…")
@@ -516,7 +699,11 @@ def stream_answer(asked: str):
                 status.write("Your earlier conversation could not be loaded and was set aside; starting a new one.")
             elif e["event"] == "retry":
                 status.write("Taking longer than expected; resuming from the last checkpoint.")
-    text = st.write_stream(pieces())
+    def pieces_then_rest():
+        yield from pieces()
+        # whatever was held: all of it unless it is the follow-up line (the buttons below take over)
+        yield split_follow_ups(held_box["text"])[0] if held_box["text"] else ""
+    text = st.write_stream(pieces_then_rest())
     if stream.error is not None:
         status.update(label="Could not finish", state="error")
         e = stream.error
@@ -549,10 +736,9 @@ def setup_card(p):
             st.session_state["applied_setup"] = fx.apply_setup(app.store, user, p)
             st.session_state.pop("proposal")
             app.store.log("setup", user, "set up their 'For you' view")
-            st.session_state[f"chat_{user}"].append(
-                {"role": "assistant", "content": "Applied. Monitor now opens on 'For you'"
-                 f"{', and ' + str(len(p['rules'])) + ' alert(s) are on the team watchlist' if p['rules'] else ''}. "
-                 "Tell me what to change, e.g. 'less macro'."})
+            say("assistant", "Applied. Monitor now opens on 'For you'"
+                f"{', and ' + str(len(p['rules'])) + ' alert(s) are on the team watchlist' if p['rules'] else ''}. "
+                "Tell me what to change, e.g. 'less macro'.")
             st.session_state["undo_ready"] = True
             st.session_state["want_view"] = "For you"  # applied on the next full run, before the toggle exists
             st.session_state["copilot_ctx"] = {"kind": "page", "page": "monitor"}  # back to normal questions
@@ -564,7 +750,7 @@ def setup_card(p):
         if c[2].button("Clear my focus", width="stretch", key="reset_setup"):
             app.store.reset_focus(user)
             st.session_state.pop("proposal")
-            st.session_state[f"chat_{user}"].append({"role": "assistant", "content": "Cleared. You see the team view."})
+            say("assistant", "Cleared. You see the team view.")
             st.session_state["copilot_ctx"] = {"kind": "page", "page": "monitor"}
             _rerun()
 
@@ -902,9 +1088,9 @@ def copilot_page():
               'Every number comes with its source.</div>')
     if c[1].button("✨ Set up my focus", width="stretch", key="setup_cp"):
         open_copilot({"kind": "setup"})
-    col = st.columns([2, 1])[0]
-    with col:
-        copilot_body(full=True)
+    # The input box is made here, at page level, so Streamlit pins it to the bottom of the window.
+    question = st.chat_input(chat_placeholder(st.session_state["copilot_ctx"]), key="copilot_input", max_chars=2000)
+    copilot_body(full=True, question=question, own_input=False)
 
 
 # ---------------------------------------------------------------- team brief

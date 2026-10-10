@@ -1228,3 +1228,66 @@ def test_without_pi_a_streaming_answer_reports_the_plain_reason(app, monkeypatch
     monkeypatch.setenv("PI_ENGINE_DIR", str(tmp_path))
     stream = Engine(app).ask_streaming("What changed?", "Kenneth")
     assert "".join(stream.text()) == "" and isinstance(stream.error, PiNotReady)
+
+
+def test_saved_chats_come_back_by_person_newest_first_and_empty_ones_are_not_listed(app):
+    """A person's conversations are kept in the shared database under their name, so a refresh (or another
+    browser with the same name) brings them back: title from the first question, newest first, with the
+    answer's tool trace so charts and sources render again. A chat with no message yet is not listed."""
+    from core.pi_engine import Answer
+    first = app.store.new_chat("Kenneth")
+    app.store.add_chat_message(first, "user", "What changed this quarter?")
+    app.store.add_chat_message(first, "assistant", "Vacancy fell.", [{"tool": "get_signals", "args": {}, "result": {"summary": "x"}}],
+                               "pi-durable:faux")
+    second = app.store.new_chat("Kenneth")
+    app.store.add_chat_message(second, "user", "And rents?")
+    app.store.new_chat("Kenneth")  # opened but never used
+    app.store.add_chat_message(app.store.new_chat("Priya"), "user", "Priya's own question")
+    chats = app.store.chats("Kenneth")
+    assert [c["id"] for c in chats] == [second, first]
+    assert chats[1]["title"] == "What changed this quarter?" and chats[1]["messages"] == 2
+    msgs = app.store.chat_messages(first)
+    assert [m["role"] for m in msgs] == ["user", "assistant"] and msgs[1]["trace"][0]["tool"] == "get_signals"
+    assert Answer(msgs[1]["content"], msgs[1]["trace"], msgs[1]["engine"]).engine == "pi-durable:faux"
+    assert [c["title"] for c in app.store.chats("Priya")] == ["Priya's own question"]
+
+
+def test_the_closing_follow_up_line_becomes_buttons_and_leaves_the_answer_text():
+    """The Copilot ends each answer with `Follow up: a | b | c`; the page shows those as buttons and the text
+    without the line. Answers without it (or with 'follow' in ordinary prose) are left alone."""
+    from core.engine import split_follow_ups
+    body, qs = split_follow_ups("Vacancy fell to 8.0%.\n\nFollow up: What about Midtown? | Show the trend | Why?")
+    assert body == "Vacancy fell to 8.0%." and qs == ["What about Midtown?", "Show the trend", "Why?"]
+    body, qs = split_follow_ups("空置率下降。\n\n**Follow up:** 中城呢？｜為什麼重要？")
+    assert body == "空置率下降。" and qs == ["中城呢？", "為什麼重要？"]
+    text = "Rents rose in the following quarter.\nFollow the Sources page for more."
+    assert split_follow_ups(text) == (text, [])
+    assert split_follow_ups("Follow up: a | b | c | d")[1] == ["a", "b", "c"]
+
+
+def test_the_copilot_is_told_to_answer_in_the_language_of_the_question_and_to_offer_follow_ups(app):
+    from core.pi_engine import system_prompt
+    rules = system_prompt(app)
+    assert "language the question is written in" in rules and "English by default" in rules
+    assert "Follow up: question one | question two | question three" in rules
+
+
+@needs_pi
+def test_each_saved_chat_keeps_its_own_copilot_conversation(app, tmp_path, monkeypatch):
+    """A new chat in the web app starts a clean Pi conversation, and resuming an old chat continues its own:
+    the conversation map for the person keys Pi conversations by chat id, with the plain name for the CLI."""
+    import json as _json
+    from core.pi_engine import PiDurableEngine
+    for v in ("PI_STORE", "PI_CONVERSATIONS", "PI_FAUX_SCRIPT"):
+        monkeypatch.delenv(v, raising=False)
+    monkeypatch.setenv("PI_FAUX", "1")
+    monkeypatch.setattr(app, "root", tmp_path)
+    eng = PiDurableEngine(app)
+    a = eng.ask("What changed?", "Kenneth", conversation="chat-a")
+    b = eng.ask("What changed?", "Kenneth", conversation="chat-b")
+    a2 = eng.ask("And rents?", "Kenneth", conversation="chat-a")
+    cli = eng.ask("What changed?", "Kenneth")
+    convs = _json.loads(eng.store_paths("Kenneth")[1].read_text())
+    assert set(convs) == {"chat-a", "chat-b", "Kenneth"} and len(set(convs.values())) == 3
+    assert a.engine.split("conversation ")[1] == a2.engine.split("conversation ")[1] != b.engine.split("conversation ")[1]
+    assert "Pi Durable" in cli.text

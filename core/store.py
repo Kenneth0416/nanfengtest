@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import uuid
 import sqlite3
 from dataclasses import asdict
 from pathlib import Path
@@ -39,6 +40,10 @@ CREATE TABLE IF NOT EXISTS staged (path TEXT PRIMARY KEY, analysis TEXT, staged_
     ts TEXT DEFAULT CURRENT_TIMESTAMP);
 CREATE TABLE IF NOT EXISTS connector_status (connector TEXT PRIMARY KEY, status TEXT, detail TEXT,
     ts TEXT DEFAULT CURRENT_TIMESTAMP);
+CREATE TABLE IF NOT EXISTS chats (id TEXT PRIMARY KEY, owner TEXT, title TEXT DEFAULT '',
+    created TEXT DEFAULT CURRENT_TIMESTAMP, updated TEXT DEFAULT CURRENT_TIMESTAMP);
+CREATE TABLE IF NOT EXISTS chat_messages (id INTEGER PRIMARY KEY AUTOINCREMENT, chat_id TEXT, role TEXT, content TEXT,
+    trace TEXT DEFAULT '', engine TEXT DEFAULT '', ts TEXT DEFAULT CURRENT_TIMESTAMP);
 CREATE TABLE IF NOT EXISTS internal_deals (id INTEGER PRIMARY KEY AUTOINCREMENT, data TEXT, property TEXT,
     status TEXT, confidentiality TEXT, ts TEXT DEFAULT CURRENT_TIMESTAMP, updated TEXT DEFAULT CURRENT_TIMESTAMP);
 """
@@ -191,6 +196,29 @@ class Store:
     def log(self, kind: str, author: str, text: str, answer: str = ""):
         self.db.execute("INSERT INTO team_log (kind, author, text, answer) VALUES (?,?,?,?)", (kind, author, text, answer))
         self.db.commit()
+
+    # -- saved Copilot chats: each person's conversations survive a refresh and can be resumed ------------
+    def new_chat(self, owner: str, title: str = "") -> str:
+        chat_id = uuid.uuid4().hex[:12]
+        self.db.execute("INSERT INTO chats (id, owner, title) VALUES (?,?,?)", (chat_id, owner, title[:80]))
+        self.db.commit()
+        return chat_id
+
+    def add_chat_message(self, chat_id: str, role: str, content: str, trace: list | None = None, engine: str = ""):
+        self.db.execute("INSERT INTO chat_messages (chat_id, role, content, trace, engine) VALUES (?,?,?,?,?)",
+                        (chat_id, role, content, json.dumps(trace) if trace else "", engine))
+        self.db.execute("UPDATE chats SET updated = CURRENT_TIMESTAMP, title = CASE WHEN title = '' AND ? = 'user' "
+                        "THEN ? ELSE title END WHERE id = ?", (role, content[:80], chat_id))
+        self.db.commit()
+
+    def chats(self, owner: str, limit: int = 30) -> list[dict]:
+        """A person's conversations, newest first, only those with a message (an empty new chat is not listed)."""
+        return self.q("SELECT c.*, COUNT(m.id) AS messages FROM chats c JOIN chat_messages m ON m.chat_id = c.id "
+                      "WHERE c.owner = ? GROUP BY c.id ORDER BY MAX(m.id) DESC LIMIT ?", (owner, limit))
+
+    def chat_messages(self, chat_id: str) -> list[dict]:
+        return [{**r, "trace": json.loads(r["trace"]) if r["trace"] else []}
+                for r in self.q("SELECT * FROM chat_messages WHERE chat_id = ? ORDER BY id", (chat_id,))]
 
     def activity(self, limit: int = 8) -> list[dict]:
         return self.q("SELECT * FROM team_log ORDER BY id DESC LIMIT ?", (limit,))

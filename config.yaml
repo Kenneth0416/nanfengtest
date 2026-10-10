@@ -104,6 +104,7 @@ signals:
 # the Copilot ("We cover acquisitions and asset management in the West End and City").
 team:
   name: London office team
+  members: [Kenneth, David, James, Sarah, Priya]   # offered on the 'Who's asking?' card; anyone can type another name
   description: "A commercial real estate business team (investment, asset management, research) monitoring the London office market."
   focus: {markets: [], measures: [rents, incentives, vacancy, demand, supply, investment, occupier_news, macro, data_quality], budget: "5", brief_format: board}
   questions:

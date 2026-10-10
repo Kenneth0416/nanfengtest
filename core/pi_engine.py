@@ -37,7 +37,10 @@ def system_prompt(app, role: str = "team") -> str:
         "You are the London Office Market Agent, a shared AI tool for one business team.\n"
         f"Today is {date.today():%d %B %Y}. The team: {team.get('description', '')} Everyone on the team "
         "sees the same Home page, alerts and brief, so changes to focus or alerts apply to the whole team.\n\n"
-        "Rules:\n- Use tools for every number; never invent figures.\n"
+        "Rules:\n- Answer in the language the question is written in: English by default, Chinese (Traditional) for a "
+        "question in Chinese. Never switch language on your own. Keep figures, place names and publisher names as "
+        "they are.\n"
+        "- Use tools for every number; never invent figures.\n"
         "- Quote the period and publisher for each figure, and flag definition differences between sources.\n"
         "- Say how a figure reached the team library: open data collected automatically, or a report uploaded "
         "by a named colleague on a date (the sources' 'provenance' field).\n"
@@ -53,7 +56,10 @@ def system_prompt(app, role: str = "team") -> str:
         "'internal only' or 'quotable', never as market evidence, and never put an internal-only record in an IC "
         "paper or anything that leaves the company.\n"
         "- Lead with the answer in plain business English, then the evidence. Keep it short.\n"
-        "- Explain why a change matters for rents, values, leasing risk or strategy.\n\n" + skills)
+        "- Explain why a change matters for rents, values, leasing risk or strategy.\n"
+        "- End every answer with one last line exactly like `Follow up: question one | question two | question three` "
+        "(two or three short questions the person could sensibly ask next, in the answer's language). The app turns "
+        "that line into buttons.\n\n" + skills)
 
 
 # A failure inside the local Pi process or its conversation store, as opposed to the model API.
@@ -109,14 +115,15 @@ class PiDurableEngine:
             return False, "no MIMO_API_KEY, ANTHROPIC_API_KEY or OPENAI_API_KEY"
         return True, "ready"
 
-    def _run(self, script: str, stdin: str, role: str, request_id: str | None, on_event=None) -> tuple[dict, str]:
+    def _run(self, script: str, stdin: str, role: str, request_id: str | None, on_event=None,
+             conversation: str | None = None) -> tuple[dict, str]:
         """One request through Pi, serialised per person. A store error resets that person's store once and
         runs again; the answer then comes from a fresh conversation (the person is told in the engine note).
         `on_event` receives each progress line ({"event": "delta"|"tool"|"tool_end"|"message_end", ...}) as it
         arrives, so the web app can stream the answer."""
         with self._lock(role):
             try:
-                return self._run_once(script, stdin, role, request_id, on_event)
+                return self._run_once(script, stdin, role, request_id, on_event, conversation)
             except RuntimeError as e:
                 if not STORE_ERROR.search(str(e)):
                     raise
@@ -125,11 +132,12 @@ class PiDurableEngine:
                       f"conversation", file=sys.stderr)
                 if on_event:
                     on_event({"event": "reset"})
-                out, rid = self._run_once(script, stdin, role, None, on_event)
+                out, rid = self._run_once(script, stdin, role, None, on_event, conversation)
                 out["store_reset"] = True
                 return out, rid
 
-    def _run_once(self, script: str, stdin: str, role: str, request_id: str | None, on_event=None) -> tuple[dict, str]:
+    def _run_once(self, script: str, stdin: str, role: str, request_id: str | None, on_event=None,
+                  conversation: str | None = None) -> tuple[dict, str]:
         if self.bridge is None:
             self.bridge = ToolBridge(self.app)
         rid = request_id or uuid.uuid4().hex
@@ -138,6 +146,9 @@ class PiDurableEngine:
         store.parent.mkdir(parents=True, exist_ok=True)
         env = {**os.environ, "BRIDGE_URL": self.bridge.url, "ROLE": role, "REQUEST_ID": rid,
                "PI_STORE": str(store), "PI_CONVERSATIONS": str(conv),
+               # which of this person's conversations the question continues (the web app's chat id); the
+               # person's one default conversation when not given (the CLI)
+               "PI_CONVERSATION_KEY": conversation or role,
                "ANTHROPIC_MODEL": os.getenv("ANTHROPIC_MODEL", llm_cfg.get("anthropic_model", "claude-opus-5-5")),
                "OPENAI_MODEL": os.getenv("OPENAI_MODEL", llm_cfg.get("openai_model", "gpt-5.5")),
                "MIMO_MODEL": os.getenv("MIMO_MODEL", llm_cfg.get("mimo_model", "mimo-v2.6-flash"))}
@@ -202,8 +213,11 @@ class PiDurableEngine:
         reader.join(timeout=5)
         return proc, final, err_box["text"] or "\n".join(out_tail[-20:])
 
-    def ask(self, question: str, role: str, request_id: str | None = None, on_event=None) -> Answer:
-        out, rid = self._run("agent.ts", question, role, request_id, on_event)
+    def ask(self, question: str, role: str, request_id: str | None = None, on_event=None,
+            conversation: str | None = None) -> Answer:
+        """`conversation` names which of the person's saved chats the question continues (each web chat keeps
+        its own Pi conversation, so a new chat starts with a clean context)."""
+        out, rid = self._run("agent.ts", question, role, request_id, on_event, conversation)
         return Answer(out.get("answer", ""), self.bridge.pop_trace(rid),
                       f"pi-durable:{out.get('model', '')} (conversation {out.get('conversation', '')})"
                       + (" · earlier conversation could not be loaded and was set aside; this is a new one"

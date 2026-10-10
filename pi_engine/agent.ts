@@ -44,20 +44,22 @@ async function main() {
 		{ models, registry }, context);
 	harness.resume(); // finish anything a previous process left mid-run
 
-	// One persistent conversation per person, so follow-up questions keep context.
+	// One persistent conversation per chat (PI_CONVERSATION_KEY, the web app's chat id) or, without one, per
+	// person (the CLI), so follow-up questions keep context and a new chat starts clean.
+	const KEY = env.PI_CONVERSATION_KEY ?? ROLE;
 	const mapPath = env.PI_CONVERSATIONS ?? "./pi_conversations.json";
 	const map: Record<string, string> = existsSync(mapPath) ? JSON.parse(readFileSync(mapPath, "utf8")) : {};
 	let conversation: any;
 	try {
-		conversation = map[ROLE] ? await harness.conversation(map[ROLE] as any, context) : undefined;
+		conversation = map[KEY] ? await harness.conversation(map[KEY] as any, context) : undefined;
 	} catch (err) {
 		// A conversation that will not load (a run killed mid-write) is left in the store; a new one starts.
-		process.stderr.write(`conversation ${map[ROLE]} could not be loaded, starting a new one: ${String(err)}\n`);
+		process.stderr.write(`conversation ${map[KEY]} could not be loaded, starting a new one: ${String(err)}\n`);
 		conversation = undefined;
 	}
 	if (!conversation) {
 		conversation = await harness.createConversation({ ownership: { kind: "ownerless" }, agent: { model } } as any, context);
-		map[ROLE] = conversation.id as string;
+		map[KEY] = conversation.id as string;
 		writeFileSync(mapPath, JSON.stringify(map, null, 1));
 	} else {
 		await conversation.configure({ model } as any, context);

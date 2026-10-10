@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import queue
+import re
 import sys
 import threading
 
@@ -55,11 +56,24 @@ def _plain(err: Exception) -> str:
             "Please try again later, or tell whoever runs the server.")
 
 
+FOLLOW_UP = re.compile(r"(?:^|\n)\s*\**\s*Follow[ -]ups?\s*:?\**\s*:?\s*(.+?)\s*$", re.I | re.S)
+
+
+def split_follow_ups(text: str) -> tuple[str, list[str]]:
+    """The answer without its closing `Follow up: a | b | c` line, and those questions as a list (at most three).
+    An answer without the line comes back unchanged with no questions."""
+    m = FOLLOW_UP.search(text or "")
+    if not m or "\n" in m.group(1).strip():
+        return text, []
+    qs = [q.strip(" -•*") for q in re.split(r"\s*[|｜]\s*", m.group(1)) if q.strip(" -•*")]
+    return text[:m.start()].rstrip(), qs[:3]
+
+
 class StreamingAnswer:
     """A Copilot answer being written: events() yields {"event": "delta", "text": ...} and tool events in order;
     when the generator finishes, `answer` holds the complete Answer (text, trace, sources) or `error` the failure."""
 
-    def __init__(self, engine: "Engine", question: str, role: str):
+    def __init__(self, engine: "Engine", question: str, role: str, conversation: str | None = None):
         self.answer: Answer | None = None
         self.error: Exception | None = None
         self.coverage = coverage.note(question, engine.app.store)
@@ -67,7 +81,7 @@ class StreamingAnswer:
 
         def run():
             try:
-                self.answer = engine.ask(question, role, None, self._q.put)
+                self.answer = engine.ask(question, role, None, self._q.put, conversation)
             except Exception as e:  # noqa: BLE001  (surfaced to the page as .error)
                 self.error = e
             finally:
@@ -110,21 +124,23 @@ class Engine:
             print(f"[agent] Pi call failed: {str(e)[-600:]}", file=sys.stderr)
             raise AgentFailed(_plain(e), str(e)[-600:]) from None
 
-    def ask(self, question: str, role: str, history: list[dict] | None = None, on_event=None) -> Answer:
-        """A Copilot question. Pi keeps each person's conversation itself, so history is not passed.
+    def ask(self, question: str, role: str, history: list[dict] | None = None, on_event=None,
+            conversation: str | None = None) -> Answer:
+        """A Copilot question. Pi keeps the conversation itself, so history is not passed; `conversation` names
+        which of the person's saved chats this continues (their one default chat when not given).
         `on_event` gets each streamed piece of the answer and each tool start as it happens."""
         gap = coverage.note(question, self.app.store)
         ans = self._run(self.pi.ask, f"{question}\n\n(Coverage note shown to the user: {gap})" if gap else question, role,
-                        None, on_event)
+                        None, on_event, conversation)
         if gap:
             ans.text = f"> **Coverage:** {gap}\n\n{ans.text}"
         return ans
 
-    def ask_streaming(self, question: str, role: str) -> "StreamingAnswer":
+    def ask_streaming(self, question: str, role: str, conversation: str | None = None) -> "StreamingAnswer":
         """The same question, answered while the person watches: Pi runs in a thread and every piece of text
         (and each tool start) is handed over as it arrives. Iterate `.events()`; `.answer` or `.error` is set when
         the iteration ends."""
-        return StreamingAnswer(self, question, role)
+        return StreamingAnswer(self, question, role, conversation)
 
     def build_deck(self, fmt: str, theme: str | None, user: str) -> tuple[dict | None, Answer]:
         """The Copilot plans the deck from this week's data: reads brief_deck_data (the ranked stories), decides
