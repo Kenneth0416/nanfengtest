@@ -1,0 +1,11 @@
+.git
+__pycache__
+.pytest_cache
+data/agent.db*
+data/pi_*
+data/pi/
+data/uploads
+data/exports
+data/internal
+pi_engine/node_modules
+.env

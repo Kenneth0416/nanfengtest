@@ -1,0 +1,7 @@
+[Unit]
+Description=Run the London Office Market Agent collection daily at 06:30
+[Timer]
+OnCalendar=*-*-* 06:30:00
+Persistent=true
+[Install]
+WantedBy=timers.target

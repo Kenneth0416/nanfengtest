@@ -1,0 +1,117 @@
+"""The one agent engine: Pi Durable. The Copilot and the information agent both run on it."""
+from __future__ import annotations
+
+import sys
+
+from . import coverage
+from .pi_engine import Answer, PiDurableEngine
+
+
+# Which playbook each information-agent tool belongs to, to show the chain of skills used.
+TOOL_SKILL = {"follow_source": "check-terms", "fetch_source": "fetch-source", "dedupe_report": "dedupe",
+              "find_matches": "dedupe", "pdf_overview": "read-pdf", "read_pdf_pages": "read-pdf",
+              "pdf_page_text": "read-pdf", "read_table": "read-table", "save_series": "read-table",
+              "classify_item": "read-article", "save_item": "read-article", "map_markets": "map-submarkets",
+              "check_figures": "check-figures", "stage_figures": "check-figures", "save_figures": "check-figures"}
+
+
+class AgentUnavailable(RuntimeError):
+    """Anything that stops the agent answering. The message is plain language for the user;
+    `detail` keeps the technical cause for the 'Technical details' expander and the logs."""
+    def __init__(self, message: str, detail: str = ""):
+        super().__init__(message)
+        self.detail = detail
+
+
+class PiNotReady(AgentUnavailable):
+    """Pi cannot run here (no Node, no `npm install`, or no model key)."""
+
+
+class AgentFailed(AgentUnavailable):
+    """Pi started but the model API failed: budget, key, rate limit or outage."""
+
+
+def _plain(err: Exception) -> str:
+    t = str(err).lower()
+    if "pi local run" in t or "timeout after" in t:
+        # the Node process or its conversation store failed; the model API was not involved
+        return ("The Copilot's run on this server failed before it reached the model (a local error, not the model "
+                "API). Please ask again; if it keeps happening, tell whoever runs the server.")
+    if any(w in t for w in ("credit", "billing", "quota", "insufficient", "budget", "balance")):
+        why = "the model API budget has run out"
+    elif any(w in t for w in ("401", "403", "authentication", "api key", "api_key", "permission")):
+        why = "the model API key was refused"
+    elif any(w in t for w in ("429", "rate limit", "rate_limit", "overloaded", "529")):
+        why = "the model API is busy right now"
+    elif any(w in t for w in ("connection error", "connecterror", "econnrefused", "enotfound", "network")):
+        why = "this server can't reach the model API"
+    elif "timeout" in t or "timed out" in t:
+        why = "the model took too long to answer"
+    else:
+        why = "the model API returned an error"
+    return (f"The agent couldn't finish this because {why}. "
+            "Please try again later, or tell whoever runs the server.")
+
+
+class Engine:
+    def __init__(self, app):
+        self.app = app
+        self.pi = PiDurableEngine(app)
+        self.ready, self.why = self.pi.available()
+        self.status = "Pi Durable (durable conversations)" if self.ready else f"Pi Durable not ready: {self.why}"
+
+    def _check(self):
+        if not self.ready:
+            raise PiNotReady("The Copilot isn't available on this server right now. Ask whoever runs it to finish "
+                             "the setup ('Running the agent' in the README).", f"{self.why}")
+
+    def _run(self, fn, *args):
+        """Every Pi call goes through here, so an API failure reaches the user as one plain sentence."""
+        self._check()
+        try:
+            return fn(*args)
+        except AgentUnavailable:
+            raise
+        except Exception as e:
+            print(f"[agent] Pi call failed: {str(e)[-600:]}", file=sys.stderr)
+            raise AgentFailed(_plain(e), str(e)[-600:]) from None
+
+    def ask(self, question: str, role: str, history: list[dict] | None = None) -> Answer:
+        """A Copilot question. Pi keeps each person's conversation itself, so history is not passed."""
+        gap = coverage.note(question, self.app.store)
+        ans = self._run(self.pi.ask, f"{question}\n\n(Coverage note shown to the user: {gap})" if gap else question, role)
+        if gap:
+            ans.text = f"> **Coverage:** {gap}\n\n{ans.text}"
+        return ans
+
+    def build_deck(self, fmt: str, theme: str | None, user: str) -> tuple[dict | None, Answer]:
+        """The Copilot plans the deck from this week's data: reads brief_deck_data (the ranked stories), decides
+        which deserve a slide, which layouts and charts, writes titles, so-whats and a `why` per slide, builds,
+        fixes anything the check reports. Returns (build result data, the Copilot's answer)."""
+        ask = (f"Build this week's team brief deck as a {'IC' if fmt == 'ic' else 'board'} pack"
+               + (f" on the {theme} theme" if theme else "") + ". Call brief_deck_data first and read the ranked stories: "
+               "decide yourself which of them deserve a slide this week (1-4 content slides; leave out anything that did "
+               "not move or does not matter to the person asking), which layout and chart or table each gets, the theme "
+               "if none was given, and the order. Write one finding per title, a so_what where the layout takes one, "
+               "speaker notes, and a `why` on every slide saying what in this week's data earned it. Call "
+               "brief_deck_guide('storyline') if you need the rules. Then call build_brief_pptx with format and spec; "
+               "if it refuses or lists problems, fix exactly those and build again. Finish with one line per slide "
+               "and its why.")
+        ans = self._run(self.pi.ask, ask, user)
+        built = next((t["result"].get("data") for t in reversed(ans.trace)
+                      if t["tool"] == "build_brief_pptx" and (t["result"].get("data") or {}).get("path")), None)
+        return built, ans
+
+    def read_upload(self, path, user: str) -> tuple[dict | None, list[str], str]:
+        """A colleague's PDF upload, read by the information agent for their review.
+        Returns (analysis staged for review, skill chain used, the agent's note)."""
+        ans = self._run(self.pi.gather, f"{user} uploaded the report at {path} for the team. Process it for their "
+                             "review: follow your playbooks (dedupe, read-pdf, map-submarkets, check-figures) "
+                             "and finish with stage_figures. If it is a duplicate, stop and say so.", user)
+        chain = list(dict.fromkeys(TOOL_SKILL.get(t["tool"], t["tool"]) for t in ans.trace if t["tool"] in TOOL_SKILL))
+        staged = self.app.store.staged(str(path))
+        return (staged, chain, ans.engine) if staged else (None, chain, ans.text)  # e.g. a duplicate
+
+    def gather(self, user: str = "team", instruction: str = "") -> Answer:
+        """A gathering round (the team inbox, open data, new report titles), or one item when given."""
+        return self._run(self.pi.gather, instruction, user)

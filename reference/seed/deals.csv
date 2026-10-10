@@ -1,0 +1,36 @@
+period,deal_type,party,building,submarket,size_sqft,rent_psf,price_gbp_m,yield_pct,note,source_id
+2024Q3,letting,BDO LLP,"The M Building, 334-338 Oxford Street, W1C",Marylebone,218496,,,,,KF_LOMR_2024Q3
+2024Q3,letting,Legal & General Investment Management,"Woolgate, 25 Basinghall Street, EC2",City Core,186648,,,,,KF_LOMR_2024Q3
+2024Q3,letting,Evercore Partners,"Southside, 105 Victoria Street, SW1E",Victoria,135239,,,,,KF_LOMR_2024Q3
+2024Q3,pre-let,A&O Shearman,"1 Broadgate, EC2A",City Core,92857,,,,,KF_LOMR_2024Q3
+2025Q2,pre-let,Squarepoint Capital,"65 Gresham Street, EC2",City Core,398227,,,,Completes Q2 2028,KF_LOMR_2025Q2
+2025Q2,pre-let,S&P Global,"100 New Bridge Street, EC4",City Core,194517,,,,Completes Q2 2026,KF_LOMR_2025Q2
+2025Q2,letting,Lego,"76 Southbank, SE1",Southbank Core,191894,,,,,KF_LOMR_2025Q2
+2025Q2,letting,London School of Economics,"Centrium, 61 Aldwych, WC2",Strand/Covent Garden,187713,,,,,KF_LOMR_2025Q2
+2025Q2,sublease,JPMorgan Chase,"1 Cabot Square, E14",Canary Wharf,148473,,,,,KF_LOMR_2025Q2
+2025Q2,pre-let,"McDermott, Will & Emery","7 Brook Street, W1",West End Core,115000,,,,Completes early 2028,KF_LOMR_2025Q2
+2025Q3,letting,HSBC,"40 Bank Street, E14",Canary Wharf,170894,,,,,KF_SPOT_2025Q3
+2025Q3,letting,InfinitSpace,"Fox Court, WC1",Midtown,101778,,,,,KF_SPOT_2025Q3
+2025Q3,letting,General Atlantic,"The Elephant, 318 Oxford Street, W1",Marylebone,52173,165.00,,,,KF_SPOT_2025Q3
+2025Q3,letting,BMS Group,"The Gherkin, EC3",City Core,64280,84.00,,,,KF_SPOT_2025Q3
+2025Q3,investment,The Arora Group,"102 Petty France, SW1",Victoria,,,245.0,7.52,Buyer,KF_SPOT_2025Q3
+2025Q4,letting,Visa,"1 Canada Square, E14",Canary Wharf,300000,,,,Rent not disclosed,KF_SPOT_2025Q4
+2025Q4,letting,"Gibson, Dunn & Crutcher","One Exchange Square, 175 Bishopsgate",City Core,152128,112.50,,,Rent range £101.00-£112.50,KF_SPOT_2025Q4
+2025Q4,letting,Ares Management,"1 Hanover Street, W1",West End Core,123968,179.50,,,Blended rent,KF_SPOT_2025Q4
+2025Q4,letting,Ripple,"One Leadenhall, EC3",City Core,91929,150.00,,,Rent range £125.00-£150.00,KF_SPOT_2025Q4
+2025Q4,investment,Capreon/Hayfin Capital,"70 St Mary Axe, EC3A",City Core,,,331.0,5.85,Buyer,KF_SPOT_2025Q4
+2025Q4,investment,Norges Bank,"London Fruit & Wool Exchange, E1",Aldgate/Whitechapel,,,315.0,6.00,Buyer,KF_SPOT_2025Q4
+2025Q4,investment,RLAM,"1 Newman Street, W1D",Fitzrovia,,,250.0,4.48,Buyer,KF_SPOT_2025Q4
+2026Q1,letting,Herbert Smith Freehills,"1 Appold Street, EC2A",City Core,266054,103.00,,,,KF_SPOT_2026Q1
+2026Q1,letting,Databricks,"Network, 10 Howland Street, W1T",Fitzrovia,137311,103.50,,,,KF_SPOT_2026Q1
+2026Q1,letting,Gilead Sciences,"1 Triton Square, NW1",King's Cross/Euston,50181,107.50,,,Rent range £105.00-£107.50,KF_SPOT_2026Q1
+2026Q1,investment,Daibiru Corporation,"Warwick Court, EC4M",City Core,,,185.0,4.80,Buyer,KF_SPOT_2026Q1
+2026Q1,investment,Unknown,"Wells & More, 45 Mortimer Street, W1",Fitzrovia,,,172.0,5.00,,KF_SPOT_2026Q1
+2026Q2,letting,Anthropic,"1 Triton Square, NW1",King's Cross/Euston,158138,97.50,,,Blended rent,KF_SPOT_2026Q2
+2026Q2,letting,OpenAI,"Jahn Court, N1",King's Cross/Euston,89975,97.00,,,Blended rent,KF_SPOT_2026Q2
+2026Q2,letting,Natixis,"Thames Court, EC4",City Core,88449,92.50,,,Rent range £62.50-£92.50,KF_SPOT_2026Q2
+2026Q2,letting,JP Morgan Chase,"1 Cabot Square, E14",Canary Wharf,89999,,,,,KF_SPOT_2026Q2
+2026Q2,letting,RPC Legal,"DSQ10, EC2",City Core,59479,92.40,,,,KF_SPOT_2026Q2
+2026Q2,investment,Barclays,"1 Churchill Place, E14",Canary Wharf,,,750.0,5.62,Owner-occupier purchase,KF_SPOT_2026Q2
+2026Q2,investment,Deka,"Stirling Square, SW1",West End Core,,,215.0,5.27,Buyer,KF_SPOT_2026Q2
+2026Q2,investment,The Brennan Family,"14 St George Street, W1",West End Core,,,170.0,3.44,Buyer,KF_SPOT_2026Q2

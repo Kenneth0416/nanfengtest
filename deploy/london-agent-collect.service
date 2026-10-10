@@ -1,0 +1,7 @@
+[Unit]
+Description=London Office Market Agent: daily open-data refresh and gathering round
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/london-office-agent
+ExecStart=/usr/bin/docker compose exec -T app python main.py refresh
+ExecStart=/usr/bin/docker compose exec -T app python main.py gather

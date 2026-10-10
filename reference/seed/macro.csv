@@ -1,0 +1,12 @@
+date,indicator,value,unit,source_id,note
+2023-08-03,bank_rate,5.25,pct,BOE_IADB,
+2024-08-01,bank_rate,5.00,pct,BOE_IADB,First cut of the cycle
+2024-11-07,bank_rate,4.75,pct,BOE_IADB,
+2025-02-06,bank_rate,4.50,pct,BOE_IADB,
+2025-05-08,bank_rate,4.25,pct,BOE_IADB,
+2025-08-07,bank_rate,4.00,pct,BOE_IADB,
+2025-12-18,bank_rate,3.75,pct,BOE_IADB,Quarter-point cut
+2026-02-05,bank_rate,3.75,pct,BOE_IADB,Held; 4 of 9 MPC members voted to cut
+2026-06-18,bank_rate,3.75,pct,BOE_IADB,Held
+2026-05-31,unemployment_rate,4.9,pct,ONS_LMS,Mar-May 2026; edged down on the quarter but above a year earlier
+2026-06-30,vacancies_k,712,thousand,ONS_LMS,Apr-Jun 2026; down 7k on the previous quarter

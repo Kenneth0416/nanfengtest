@@ -1,0 +1,24 @@
+# One command for an evaluator:  docker compose up   then open http://localhost:8501
+# Put MIMO_API_KEY (or ANTHROPIC_API_KEY / OPENAI_API_KEY) in a .env file next to this one for the Copilot;
+# without a key the dashboards, signals, brief and slides still work and the Copilot says it is offline.
+services:
+  app:
+    build: { context: ., dockerfile: deploy/Dockerfile }
+    env_file:
+      - path: .env
+        required: false
+    volumes: ["./data:/app/data"]      # SQLite, Pi Durable stores, uploaded reports persist across restarts
+    ports: ["8501:8501"]               # local evaluation; behind Caddy on a server use `expose` instead
+    restart: unless-stopped
+
+  # Optional HTTPS front door for a server deployment:  docker compose --profile server up -d
+  caddy:
+    image: caddy:2
+    profiles: ["server"]
+    ports: ["80:80", "443:443"]
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    restart: unless-stopped
+volumes: { caddy_data: {}, caddy_config: {} }

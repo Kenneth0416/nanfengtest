@@ -1,0 +1,11 @@
+{
+  "name": "london-office-agent-pi-engine",
+  "private": true,
+  "type": "module",
+  "description": "Pi Durable engine for the London Office Market Agent: the Copilot (agent.ts) and the market-gather extension and gatherer (gather.ts). Data tools are served by the Python app.",
+  "dependencies": {
+    "@earendil-works/chord": "1.1.0",
+    "@earendil-works/pi-ai": "1.1.0",
+    "@earendil-works/pi-durable": "1.1.0"
+  }
+}

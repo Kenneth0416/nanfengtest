@@ -1,0 +1,12 @@
+__pycache__/
+*.pyc
+data/agent.db*
+data/pi_durable.sqlite*
+data/pi_conversations.json
+pi_engine/node_modules/
+.env
+.pytest_cache/
+data/uploads/
+data/exports/
+data/internal/
+data/pi/

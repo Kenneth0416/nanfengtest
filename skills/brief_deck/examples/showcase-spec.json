@@ -1,0 +1,28 @@
+{
+  "theme": "forest-cream",
+  "slides": [
+    {"layout": "Cover", "eyebrow": "London office market  ·  owner update", "title": "Occupiers are back; capital is still cautious",
+     "notes": "Demand is improving faster than investment.",
+     "fill": {"subtitle": "auto", "headline": "auto", "kpis": "auto", "caveat": "auto"}},
+    {"layout": "Statement", "eyebrow": "The call this week",
+     "notes": "One sentence for the room: leasing has turned, pricing has not.",
+     "fill": {"statement": "Leasing has turned. *Pricing has not.*",
+              "attribution": "Take-up is 11% above its long-term average; investment is 36% below it."}},
+    {"layout": "Stat row", "eyebrow": "02  ·  The quarter in four numbers", "title": "Vacancy fell to *8.0%* as take-up ran ahead of average",
+     "so_what": "Less space on the market supports rents in the core submarkets.",
+     "notes": "Vacancy 8.0%, take-up 3.10m sq ft, investment £2.00bn, Bank Rate 3.75%.",
+     "fill": {"stats": "auto", "chart_label": "Central London vacancy rate", "chart": {"chart": "vacancy"},
+              "source": "Source [3]. Quarters with no figures in the library are not shown."}},
+    {"layout": "Numbered pillars", "eyebrow": "03  ·  What it means", "title": "Three things to tell owners this week",
+     "so_what": "Hold asking rents in the core; price City assets off the Churchill Place evidence.",
+     "notes": "Each pillar maps to one data slide in the board pack.",
+     "fill": {"pillars": [
+       {"head": "Demand is building", "body": "Active requirements are up to 14.30m sq ft and take-up of 3.10m sq ft is 11% above the long-term average."},
+       {"head": "Core rents are holding", "body": "West End Core leads at £185/sq ft and few submarkets moved on the quarter."},
+       {"head": "Capital is selective", "body": "Investment of £2.00bn is 36% below the long-term average; City & Southbank is 77% below its own."}]}},
+    {"layout": "Timeline", "eyebrow": "04  ·  How we got here", "title": "Five quarters of falling vacancy",
+     "notes": "Vacancy and take-up by quarter from the library.",
+     "fill": {"steps": "auto"}},
+    {"layout": "Sources", "eyebrow": "Sources", "title": "Sources and caveats", "notes": "Every figure carries [n].", "fill": {"body": "auto"}}
+  ]
+}

@@ -1,0 +1,115 @@
+# London Office Market Agent - configuration.
+# Add or remove a capability by editing the lists below; core code stays unchanged.
+
+agent:
+  timeout_seconds: 1800     # one Pi run (a 13-page upload needs ~10 min); a timeout resumes the same durable run once
+
+llm:
+  provider: auto            # auto | mimo | anthropic | openai | offline  (auto = whichever API key is set, MiMo first)
+  mimo_model: mimo-v2.6-flash
+  mimo_base_url: https://api.xiaomimimo.com/v1
+  anthropic_model: claude-opus-5-5
+  anthropic_effort: medium
+  openai_model: gpt-5.5
+  classify_news_with_llm: true
+
+# Model that reads agency PDFs (each page rendered to an image). Separate from the chat model above,
+# so PDF reading can use a cheap vision model while the Copilot keeps its own. Any OpenAI-compatible
+# endpoint works. Without the key below, PDFs fall back to the chat model, then to rule-based text reading.
+vision:
+  base_url: https://api.xiaomimimo.com/v1
+  model: mimo-v2.6-flash
+  api_key_env: MIMO_API_KEY
+  pages_per_call: 2          # small models mix up pages when shown too many at once
+  parallel: 4                # page batches sent at the same time (a 13-page report in 2 rounds, not 7)
+  reasoning_effort: low      # reading a table needs no long chain of thought; keeps each call under a minute
+  max_tokens: 8000
+  long_side_px: 2500
+  detail: high
+
+database: data/agent.db
+
+connectors:                 # data sources (connectors/<module>.py)
+  - id: seed_research
+    module: connectors.seed_csv
+    options: {path: reference/seed}
+  - id: boe_bank_rate
+    module: connectors.boe_rates
+    enabled: true
+  - id: followed_sources       # sources colleagues added in Sources or through the Copilot
+    module: connectors.followed
+    enabled: true
+  - id: news_rss
+    module: connectors.news_rss
+    enabled: true
+    options:
+      queries: ["London office market", "City of London office letting", "Canary Wharf offices",
+                "West End office rent", "London office development pre-let"]
+      max_age_days: 30
+
+# The team's shared data library has two ways in (see Sources):
+#  feeds    open data the agent collects by itself (licence allows it), on a schedule
+#  uploads  reports whose terms bar automated collection or AI use (e.g. Knight Frank); any colleague
+#           uploads the PDF they can access, the agent reads and checks it, and the whole team sees it.
+feeds:
+  - {name: Bank of England Bank Rate, what: "Bank Rate, every change since 2023", publisher: Bank of England, licence: Open Government Licence, cadence: daily, connector: boe_bank_rate}
+  - {name: London office news (RSS), what: "Lettings, deals, supply and macro stories", publisher: Google News search feeds, licence: "Headlines and links only", cadence: daily, connector: news_rss}
+  - {name: ONS labour market, what: "Employment and unemployment, London", publisher: Office for National Statistics, licence: Open Government Licence, cadence: monthly, connector: seed_research, note: "Snapshot in the seed data; live connector is next"}
+  - {name: Nomis workplace employment, what: "London jobs in finance, tech, professional services", publisher: ONS / Nomis, licence: Open Government Licence, cadence: annual, note: "Planned"}
+  - {name: City of London development pipeline, what: "Office schemes over 1,000 sq m: permitted, under construction, due dates", publisher: City of London Corporation, licence: Open Government Licence, cadence: quarterly, note: "Planned"}
+  - {name: London Development Database, what: "Planning permissions, starts and completions across London", publisher: Greater London Authority, licence: Open Government Licence, cadence: weekly, note: "Planned"}
+  - {name: Office floorspace and rateable values, what: "Office floorspace and rateable value per m² by borough", publisher: Valuation Office Agency, licence: Open Government Licence, cadence: annual, note: "Planned"}
+  - {name: Non-domestic EPC register, what: "Energy ratings of office buildings (MEES risk)", publisher: DLUHC, licence: Open Government Licence, cadence: monthly, note: "Planned"}
+  - {name: "Sources the team follows", what: "Pages and feeds colleagues asked the agent to watch", publisher: "Added by colleagues", licence: "Checked per source when added", cadence: daily, connector: followed_sources}
+  - {name: Listed landlords' results, what: "British Land, Landsec, Derwent London, GPE: ERV growth, vacancy, yields", publisher: "British Land, Landsec, Derwent, GPE", licence: "Public filing (terms checked per company)", cadence: half-yearly, note: "Planned"}
+
+auto_update_hours: 24       # the app collects open data on start-up when the last run is older than this
+
+# Agency reports the team expects each quarter. When one is probably out (quarter end + lag) and nobody
+# has uploaded it, Monitor nudges the whole team. Only titles would ever be checked, never the PDF.
+expected_reports:
+  - {publisher: Knight Frank, lag_days: 28}
+  - {publisher: Savills, lag_days: 35}
+
+# Research index pages the information agent reads for new report TITLES only (never the PDF), so a colleague
+# can upload a new quarter's report. Check each site's terms before switching this on in production.
+report_index:
+  - {publisher: Knight Frank, url: "https://www.knightfrank.co.uk/research"}
+  - {publisher: Savills, url: "https://www.savills.co.uk/research_articles/"}
+
+gather:
+  merge_at: 0.55             # match score at which a shared item is treated as the same story
+
+skills:                     # agent skills (skills/<name>/SKILL.md + tools.py)
+  - market_metrics
+  - submarket_compare
+  - supply_and_deals
+  - macro_watch
+  - news_monitor
+  - watchlist_alerts
+  - market_brief
+  - report_ingest
+  - market_gather            # links and tips from colleagues, merging, hotness, report titles
+  - info_processing          # parsing steps for the information agent (playbooks in info_skills/)
+  - brief_deck               # the team brief as a 3-6 slide PowerPoint (python-pptx; Copilot writes the titles)
+  - internal_data            # 🔵 our own deals: one record from a sentence, a photo, a PDF or a spreadsheet
+
+signals:
+  news_window_days: 365
+  news_min_importance: 4
+  pipeline_horizon_quarters: 6
+
+# One shared workspace for the whole business team. Everyone sees the same Home, alerts, brief and
+# team activity. The focus below is the starting point; the team changes it by describing itself to
+# the Copilot ("We cover acquisitions and asset management in the West End and City").
+team:
+  name: London office team
+  description: "A commercial real estate business team (investment, asset management, research) monitoring the London office market."
+  focus: {markets: [], measures: [rents, incentives, vacancy, demand, supply, investment, occupier_news, macro, data_quality], budget: "5", brief_format: board}
+  questions:
+    - "What changed in the London office market this quarter?"
+    - "Compare West End Core, City Core and Canary Wharf"
+    - "Is there speculative supply coming in Canary Wharf?"
+    - "Which figures disagree between sources?"
+    - "Show recent investment deals and yields"
+    - "Rank submarkets by vacancy"

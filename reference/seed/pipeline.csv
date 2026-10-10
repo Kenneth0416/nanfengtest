@@ -1,0 +1,11 @@
+scheme,submarket,size_sqft,expected_completion,status,prelet_party,note,source_id
+"65 Gresham Street, EC2",City Core,398227,2028Q2,pre-let,Squarepoint Capital,,KF_LOMR_2025Q2
+"100 New Bridge Street, EC4",City Core,194517,2026Q2,pre-let,S&P Global,,KF_LOMR_2025Q2
+"7 Brook Street, W1",West End Core,115000,2028Q1,pre-let,"McDermott, Will & Emery",Early 2028,KF_LOMR_2025Q2
+"17 Columbus Courtyard, E14",Canary Wharf,178338,2026Q4,speculative,,,KF_LOMR_2025Q2
+"One North Quay, E14",Rest of Docklands,540000,2027Q4,speculative,,By end 2027,KF_LOMR_2025Q2
+"2 Finsbury Avenue, EC2",City Core,750000,2027Q2,pre-let,Citadel,"Broadgate; part pre-let, balance speculative. Size rounded from public announcements; verify.",DEV_ANNOUNCE_2026
+"2 Aldermanbury Square, EC2",City Core,320000,2026Q4,pre-let,Clifford Chance,Size rounded from public announcements; completion as announced; verify.,DEV_ANNOUNCE_2026
+"50 Fenchurch Street, EC3",City Core,650000,2028Q4,speculative,,Size rounded from public announcements; completion as announced; verify.,DEV_ANNOUNCE_2026
+"81 Newgate Street (Panorama St Paul's), EC1",City Core,540000,2026Q4,speculative,,Refurbishment and extension. Size rounded from public announcements; verify.,DEV_ANNOUNCE_2026
+"Portland House, SW1",Victoria,400000,2027Q4,speculative,,Refurbishment. Size rounded from public announcements; verify.,DEV_ANNOUNCE_2026

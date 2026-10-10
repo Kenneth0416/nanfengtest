@@ -1,0 +1,23 @@
+{
+  "theme": "navy-gold",
+  "slides": [
+    {"layout": "Cover", "eyebrow": "London office market  ·  board pack", "title": "Occupiers are back; capital is still cautious",
+     "notes": "Demand is improving faster than investment. Vacancy is at 8.0% and take-up is 11% above average, but investment is 36% below its long-term average.",
+     "fill": {"subtitle": "auto", "headline": "auto", "kpis": "auto", "caveat": "auto"}},
+    {"layout": "Hero number", "eyebrow": "02  ·  Occupiers", "title": "Vacancy fell to 8.0%, the lowest since Q1 2024",
+     "so_what": "Less space on the market supports rents in the core submarkets.",
+     "notes": "Vacancy has fallen from 9.9% in Q1 2024 to 8.0%. Take-up of 3.10m sq ft is 11% above the long-term average.",
+     "fill": {"hero": {"metric": "vacancy_pct"}, "chart_label": "Central London vacancy rate", "chart": {"chart": "vacancy"},
+              "source": "Source [1]. Quarters with no figures in the library are not shown."}},
+    {"layout": "Chart + table", "eyebrow": "03  ·  Capital markets", "title": "Investment £2.00bn: one Docklands deal masks a thin City",
+     "so_what": "City pricing evidence is scarce; lean on the Churchill Place yield for valuations.",
+     "notes": "The Barclays purchase of 1 Churchill Place lifted Docklands & Stratford to £0.75bn. City & Southbank was £0.37bn against a £1.60bn average.",
+     "fill": {"chart_label": "Investment, £bn, Q2 2026 vs long-term average", "chart": {"chart": "investment"},
+              "table_label": "Pricing and rates", "table": {"table": "yields"},
+              "source": "Source [1]. Yields are the publisher's prime yields."}},
+    {"layout": "Signal cards", "eyebrow": "04  ·  What changed", "title": "Six things that changed and why they matter",
+     "notes": "Read the red cards first: rate volatility and the One North Quay scheme are the risks.",
+     "fill": {"cards": "auto", "talk": "auto"}},
+    {"layout": "Sources", "eyebrow": "Sources", "title": "Sources and caveats", "notes": "Every figure carries [n].", "fill": {"body": "auto"}}
+  ]
+}
