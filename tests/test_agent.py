@@ -552,6 +552,39 @@ def test_copilot_has_its_own_mimo_model(app, monkeypatch):
         assert "mimo-v2.6-pro-ultraspeed" in (ROOT / name).read_text().lower()
 
 
+def test_answer_votes_are_per_person_and_clearable(app):
+    """Thumbs up / down under a Copilot answer: one vote per person per answer, pressing again clears it, and the
+    votes never touch the signal feedback that hides cards."""
+    st = app.store
+    cid = st.new_chat("Voter", "votes")  # its own person, so the saved-chats test's counts are untouched
+    st.add_chat_message(cid, "user", "q")
+    mid = st.add_chat_message(cid, "assistant", "a")
+    assert st.answer_vote(mid, "Voter") == 0
+    st.vote_answer(mid, "Voter", 1)
+    st.vote_answer(mid, "Other", -1)
+    assert st.answer_vote(mid, "Voter") == 1 and st.answer_vote(mid, "Other") == -1
+    st.vote_answer(mid, "Voter", -1)
+    assert st.answer_vote(mid, "Voter") == -1
+    st.vote_answer(mid, "Voter", 0)
+    assert st.answer_vote(mid, "Voter") == 0 and st.answer_vote(mid, "Other") == -1
+    assert not st.hidden_signals("Other") and not st.liked_signals("Voter")
+
+
+def test_copilot_layout_pieces_exist():
+    """The Copilot page follows the ChatGPT-style layout spec: a page-only stylesheet hook, a sticky top bar, no
+    avatars, a right-hand bubble for the question, an action row per answer, the Stop button over the send
+    button, a disclaimer under the chat box, and a 500px side panel."""
+    src = (ROOT / "app.py").read_text()
+    for needle in ('class="loa-cp-page"', "st-key-cp_top_", "stChatMessageAvatarUser", "justify-content:flex-end",
+                   "st-key-acts_", "placeStop", "loa-copy", "Copilot can be wrong", 'width="small"', "loa-latest",
+                   "st.pills(", "SETUP_PILL", "Worked through"):
+        assert needle in src, needle
+    assert "Tools used:" not in src and "Enter sends" not in src
+    from core import icons
+    assert icons.material("copy") and icons.material("clock") and "copy" in icons.PATHS and "arrow-up" in icons.PATHS
+    assert 'toolbarMode = "minimal"' in (ROOT / ".streamlit" / "config.toml").read_text()
+
+
 def test_a_mimo_key_powers_chat_vision_and_pi(app, monkeypatch):
     from core import llm as L
     from core.pi_engine import PiDurableEngine

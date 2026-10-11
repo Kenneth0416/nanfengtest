@@ -27,6 +27,8 @@ CREATE TABLE IF NOT EXISTS user_seen (user TEXT PRIMARY KEY, last_seen TEXT);
 CREATE TABLE IF NOT EXISTS watch_rules (id INTEGER PRIMARY KEY AUTOINCREMENT, role TEXT, market TEXT,
     metric TEXT, op TEXT, value REAL, label TEXT);
 CREATE TABLE IF NOT EXISTS feedback (signal_id TEXT, role TEXT, vote INTEGER, ts TEXT DEFAULT CURRENT_TIMESTAMP);
+CREATE TABLE IF NOT EXISTS answer_votes (message_id INTEGER, role TEXT, vote INTEGER, ts TEXT DEFAULT CURRENT_TIMESTAMP,
+                                          PRIMARY KEY (message_id, role));
 CREATE TABLE IF NOT EXISTS user_focus (user TEXT, data TEXT, ts TEXT DEFAULT CURRENT_TIMESTAMP);
 CREATE TABLE IF NOT EXISTS brief_items (signal_id TEXT PRIMARY KEY, data TEXT, added_by TEXT,
     ts TEXT DEFAULT CURRENT_TIMESTAMP);
@@ -391,6 +393,19 @@ class Store:
 
     def liked_signals(self, role: str) -> set[str]:
         return {r["signal_id"] for r in self.q("SELECT signal_id FROM feedback WHERE role=? AND vote>0", (role,))}
+
+    # -- thumbs up / down on a Copilot answer (one vote per person per answer; 0 clears it) ------------
+    def vote_answer(self, message_id: int, role: str, vote: int):
+        if vote == 0:
+            self.db.execute("DELETE FROM answer_votes WHERE message_id=? AND role=?", (message_id, role))
+        else:
+            self.db.execute("INSERT OR REPLACE INTO answer_votes (message_id, role, vote) VALUES (?,?,?)",
+                            (message_id, role, 1 if vote > 0 else -1))
+        self.db.commit()
+
+    def answer_vote(self, message_id: int, role: str) -> int:
+        r = self.q("SELECT vote FROM answer_votes WHERE message_id=? AND role=?", (message_id, role))
+        return r[0]["vote"] if r else 0
 
     # -- team inbox: links and tips colleagues share, waiting for the gatherer ---------------------
     def add_to_inbox(self, text: str, url: str, how: str, shared_by: str) -> int:

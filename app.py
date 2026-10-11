@@ -56,6 +56,113 @@ KIND_FOLD = {"metric_move": "Market data", "vs_long_term": "vs long-term average
 NOT_PEOPLE = {"auto", "cli", "scheduler", "guest", "agent", "team", "poc seed", "auto-update"}
 
 # ---------------------------------------------------------------- look (from the prototype)
+# The Copilot conversation follows ChatGPT's layout (research/copilot-chat-layout.md): a fixed top bar, a centred
+# scrolling thread, a fixed chat box; SCOPE is the page or the side panel.
+CHAT_CSS = r"""
+/* Copilot thread (SCOPE): no avatars; the reader's question is a light bubble on the right, the answer is plain text */
+SCOPE [data-testid="stChatMessageAvatarUser"], SCOPE [data-testid="stChatMessageAvatarAssistant"],
+SCOPE [data-testid="stChatMessageAvatarCustom"] { display:none; }
+SCOPE [data-testid="stChatMessage"] { background:transparent; padding:0; gap:0; margin:0 0 20px 0; }
+SCOPE [data-testid="stChatMessage"]:last-child { margin-bottom:0; }
+SCOPE [data-testid="stChatMessage"]:has(> [data-testid="stChatMessageAvatarUser"]) { justify-content:flex-end; margin-bottom:12px; }
+SCOPE [data-testid="stChatMessage"]:has(> [data-testid="stChatMessageAvatarUser"]) > [data-testid="stChatMessageContent"]
+  { flex:0 1 auto; max-width:75%; background:var(--sunk); color:var(--ink); border-radius:18px; padding:10px 16px; }
+SCOPE [data-testid="stChatMessageContent"] { width:100%; }
+SCOPE [data-testid="stChatMessageContent"] [data-testid="stMarkdownContainer"] { font-size:16px; line-height:1.65; color:var(--ink); }
+SCOPE [data-testid="stChatMessageContent"] [data-testid="stMarkdownContainer"] p { font-size:16px; line-height:1.65; }
+SCOPE [data-testid="stChatMessageContent"] [data-testid="stMarkdownContainer"] table { display:block; overflow-x:auto; max-width:100%; }
+/* the work line above an answer ("Worked through 3 steps", or the live status): a quiet line, no box */
+SCOPE [data-testid="stChatMessage"] [data-testid="stExpander"] details { border:none; background:transparent; }
+SCOPE [data-testid="stChatMessage"] [data-testid="stExpander"] summary { padding:2px 0; font-size:13px; color:var(--ink3); }
+SCOPE [data-testid="stChatMessage"] [data-testid="stExpander"] summary:hover { color:var(--ink); }
+SCOPE [data-testid="stChatMessage"] [data-testid="stExpander"] summary [data-testid="stMarkdownContainer"] p { font-size:13px; color:inherit; }
+SCOPE [data-testid="stChatMessage"] [data-testid="stExpanderDetails"] { padding:0 0 4px 0; }
+/* sources line under an answer */
+SCOPE .loa-srcs { border-top:1px solid var(--line); margin-top:10px; padding-top:8px; font-size:12px; color:var(--ink3); }
+SCOPE .loa-srcs > span { margin-right:6px; }
+/* action row: 32px borderless icon buttons; the latest answer's row stays, older rows appear on hover */
+SCOPE [class*="st-key-acts_"] { opacity:0; transition:opacity .15s; margin-left:-6px; }
+SCOPE [data-testid="stChatMessage"]:hover [class*="st-key-acts_"], SCOPE [class*="st-key-acts_last_"] { opacity:1; }
+SCOPE [class*="st-key-acts_"] button, SCOPE .loa-copy { width:32px; height:32px; min-height:32px; padding:0; border:none;
+  border-radius:6px; background:transparent; color:var(--ink3); display:inline-flex; align-items:center; justify-content:center; }
+SCOPE [class*="st-key-acts_"] button:hover, SCOPE .loa-copy:hover { background:var(--sunk); color:var(--ink); }
+SCOPE [class*="st-key-acts_"] button[kind="primary"] { background:var(--accent-soft); color:var(--accent); }
+SCOPE [class*="st-key-acts_"] button [data-testid="stIconMaterial"] { font-size:18px; }
+SCOPE [class*="st-key-acts_"] [data-testid="stPopover"] > button { width:32px; height:32px; min-height:32px; padding:0; border:none; }
+SCOPE [class*="st-key-acts_"] [data-testid="stPopover"] > button [data-testid="stIconMaterial"] { font-size:18px; }
+SCOPE [class*="st-key-acts_"] [data-testid="stPopover"] > button svg { display:none; }
+SCOPE .loa-copy { cursor:pointer; vertical-align:middle; }
+SCOPE .loa-copy.done { color:var(--open); }
+SCOPE .loa-shared { font-size:12px; color:var(--ink3); margin-left:4px; }
+SCOPE [class*="st-key-acts_"] [class*="st-key-undo"] button { width:auto; padding:0 8px; font-size:12px; }
+/* follow-up and example questions: left-aligned pills */
+SCOPE [data-testid="stPills"] button { border-radius:999px; font-size:13.5px; }
+SCOPE .loa-fu { font-size:12px; color:var(--ink3); margin:2px 0 2px 0; }
+/* the chat box: 12px corners, a light shadow, a round send button */
+SCOPE [data-testid="stChatInput"] { border-radius:12px; box-shadow:0 2px 12px rgba(15,26,42,.06); border-color:var(--line); }
+SCOPE [data-testid="stChatInput"]:focus-within { border-color:var(--accent); }
+SCOPE [data-testid="stChatInputSubmitButton"] { border-radius:50%; }
+SCOPE [data-testid="stChatInputSubmitButton"]:not(:disabled) { background:var(--accent); color:#fff; }
+SCOPE [data-testid="stChatInputSubmitButton"]:disabled { background:var(--sunk); color:var(--ink3); }
+/* while an answer is being written the Stop button sits where the send button was (the script places it) */
+SCOPE [class*="st-key-stop_"] button { width:32px; height:32px; min-height:32px; padding:0; border-radius:50%;
+  background:var(--ink); color:#fff; border:none; }
+SCOPE [class*="st-key-stop_"] button [data-testid="stIconMaterial"] { font-size:18px; }
+SCOPE [class*="st-key-stop_"] button:hover { background:var(--accent); color:#fff; }
+/* the top bar stays at the top of the scrolling area */
+SCOPE [class*="st-key-cp_top_"], SCOPE [data-testid="stLayoutWrapper"]:has(> [class*="st-key-cp_top_"])
+  { position:sticky; top:0; z-index:20; background:var(--bg); }
+SCOPE [class*="st-key-cp_top_"] { padding:10px 0 8px 0; margin-bottom:4px; }
+SCOPE [class*="st-key-cp_top_"] { flex-wrap:nowrap !important; }
+SCOPE [class*="st-key-cp_top_"] > .stElementContainer:has(> .stHtml) { flex:1 1 auto; width:auto !important; min-width:0; }
+SCOPE [class*="st-key-cp_top_"] > .stElementContainer:has(> .stHtml) .loa-cp-title { flex-wrap:nowrap; overflow:hidden; }
+SCOPE [class*="st-key-cp_top_"] .loa-cp-title .loa-chip { overflow:hidden; text-overflow:ellipsis; max-width:260px; }
+SCOPE .loa-cp-title { font-size:16px; font-weight:700; color:var(--ink); display:flex; align-items:center; gap:10px; flex-wrap:wrap; line-height:32px; }
+SCOPE .loa-cp-title .loa-chip { margin:0; font-weight:400; line-height:20px; background:var(--surface); border:1px solid var(--line); }
+SCOPE .loa-cp-title small { font-size:12px; font-weight:400; color:var(--ink3); }
+SCOPE [class*="st-key-cp_top_"] button, SCOPE [class*="st-key-cp_top_"] [data-testid="stPopover"] > button { min-height:32px; height:32px; padding:0 10px; font-size:13px; }
+/* empty state: a greeting in the middle of the space, the example questions under it */
+SCOPE [class*="st-key-cp_empty_"] { min-height:calc(100vh - 300px); display:flex; flex-direction:column; justify-content:center; }
+SCOPE .loa-cp-hello { font-size:24px; font-weight:700; color:var(--ink); line-height:1.3; }
+SCOPE .loa-ctx-line { display:none; margin:-4px 0 8px 0; }
+SCOPE .loa-ctx-line .loa-chip { background:var(--surface); border:1px solid var(--line); margin:0; }
+SCOPE .loa-cp-sub { font-size:15px; color:var(--ink2); margin:6px 0 14px 0; padding-bottom:14px; border-bottom:1px solid var(--line); }
+"""
+PAGE_CSS = r"""
+/* ---- Copilot page: a centred 760px thread between a fixed top bar and the fixed chat box (ChatGPT's three bands) */
+body:has(.loa-cp-page) [data-testid="stMainBlockContainer"] { max-width:808px; margin:0 auto; padding-top:8px; padding-bottom:8px; }
+body:has(.loa-cp-page) [data-testid="stBottomBlockContainer"] { max-width:808px; margin:0 auto; padding-top:8px; }
+body:has(.loa-cp-page) header[data-testid="stHeader"] { background:transparent; pointer-events:none; }
+body:has(.loa-cp-page) header[data-testid="stHeader"] * { pointer-events:auto; }
+body:has(.loa-cp-page) .loa-notice { margin:0 0 4px 0; }
+body:has(.loa-cp-page) [data-testid="stBottomBlockContainer"]::after, div[data-testid="stDialog"] .stElementContainer:has(> .stChatInput)::after
+  { content:"Copilot can be wrong. Every number links to its source; check the ones marked \26A0.";
+    display:block; text-align:center; font-size:11.5px; color:var(--ink3); padding-top:6px; }
+/* the side panel: about 500px, its own top bar instead of the dialog's title */
+div[data-testid="stDialog"] section > h2, div[data-testid="stDialog"] section > button:first-child { display:none; }
+div[data-testid="stDialog"] section > div { padding-top:0; }
+div[data-testid="stDialog"] [class*="st-key-cp_top_"], div[data-testid="stDialog"] [data-testid="stLayoutWrapper"]:has(> [class*="st-key-cp_top_"]) { background:var(--surface); top:-1px; }
+div[data-testid="stDialog"] [data-testid="stChatMessageContent"] [data-testid="stMarkdownContainer"],
+div[data-testid="stDialog"] [data-testid="stChatMessageContent"] [data-testid="stMarkdownContainer"] p { font-size:15px; }
+div[data-testid="stDialog"] [data-testid="stChatMessage"]:has(> [data-testid="stChatMessageAvatarUser"]) > [data-testid="stChatMessageContent"] { max-width:85%; }
+div[data-testid="stDialog"] [class*="st-key-cp_empty_"] { min-height:calc(100vh - 260px); }
+div[data-testid="stDialog"] .loa-cp-hello { font-size:22px; }
+.st-key-fab_close button { width:32px; height:32px; min-height:32px; padding:0; border-radius:6px; }
+/* the floating "jump to latest" button: a round arrow just above the chat box */
+.loa-latest { position:fixed; z-index:1000; width:32px; height:32px; border-radius:50%; border:1px solid var(--line); background:#fff;
+  color:var(--ink); display:none; align-items:center; justify-content:center; cursor:pointer; box-shadow:0 2px 8px rgba(15,26,42,.15); padding:0; }
+.loa-latest:hover { background:var(--sunk); }
+@media (hover:none) { [class*="st-key-acts_"] { opacity:1 !important; } }
+@media (max-width:760px) {
+  body:has(.loa-cp-page) [class*="st-key-cp_top_"] { padding-left:44px; }
+  body:has(.loa-cp-page) [data-testid="stChatMessage"]:has(> [data-testid="stChatMessageAvatarUser"]) > [data-testid="stChatMessageContent"] { max-width:85%; }
+  body:has(.loa-cp-page) [data-testid="stBottomBlockContainer"] { padding-bottom:max(8px, env(safe-area-inset-bottom)); }
+  [class*="st-key-cp_top_"] button span[data-testid="stMarkdownContainer"] { display:none; }
+  /* the context chip leaves the bar for its own line under it; the name goes (it is in the sidebar) */
+  [class*="st-key-cp_top_"] .loa-cp-title small, [class*="st-key-cp_top_"] .loa-cp-title .loa-chip { display:none; }
+  .loa-ctx-line { display:block; }
+}
+"""
 st.html("""
 <style>
 /* Tokens from prototype/design-tokens.md: slate neutrals, navy accent, amber highlight, four semantic colours */
@@ -137,14 +244,10 @@ a.loa-chip { text-decoration:none; }
 /* Copilot floating button: bottom right of every page, above the content; gone while the panel is open */
 .st-key-fab_copilot { position:fixed; right:max(20px, env(safe-area-inset-right)); bottom:max(20px, env(safe-area-inset-bottom));
   z-index:1001; width:auto !important; }
-.st-key-fab_copilot button, .st-key-fab_close button { width:48px; height:48px; min-height:48px; border-radius:50%; padding:0;
+.st-key-fab_copilot button { width:48px; height:48px; min-height:48px; border-radius:50%; padding:0;
   box-shadow:0 4px 16px rgba(15,26,42,.30); }
-.st-key-fab_copilot button [data-testid="stIconMaterial"], .st-key-fab_close button [data-testid="stIconMaterial"] { font-size:24px; }
+.st-key-fab_copilot button [data-testid="stIconMaterial"] { font-size:24px; }
 body:has(div[data-testid="stDialog"]) .st-key-fab_copilot { display:none; }
-/* while the panel is open the same spot holds a white close button, just left of the panel's edge (desktop) */
-.st-key-fab_close { position:fixed; bottom:max(20px, env(safe-area-inset-bottom)); right:772px; z-index:1001; width:auto !important; }  /* panel is 752px wide */
-.st-key-fab_close button { background:#fff; color:var(--accent); border:1px solid var(--line); }
-@media (max-width: 760px) { .st-key-fab_close { display:none; } }
 /* Copilot side panel: the input box stays at the bottom of the panel while the conversation scrolls above it */
 div[data-testid="stDialog"] section > div { display:flex; flex-direction:column; }
 div[data-testid="stDialog"] section > div > div[data-testid="stVerticalBlock"],
@@ -156,6 +259,8 @@ div[data-testid="stDialog"] .stElementContainer:has(> .stChatInput) { position:s
 </style>
 """)
 st.html(f"<style>{icons_css()}</style>")  # the icons themselves (CSS masks: st.html strips inline <svg>)
+st.html("<style>" + CHAT_CSS.replace("SCOPE", "body:has(.loa-cp-page)") + CHAT_CSS.replace("SCOPE", 'div[data-testid="stDialog"]')
+        + PAGE_CSS + "</style>")
 
 
 def esc(x) -> str:
@@ -394,7 +499,13 @@ def chart(spec: dict | None):
 
 
 def show_answer(ans, text_done: bool = False):
+    """One answer: a quiet 'Worked through N steps' line (the tools, folded), the text, its charts and downloads,
+    then the sources line. While the answer streams, the live status line plays the first part."""
     if not text_done:
+        if ans.trace:
+            tools = list(dict.fromkeys(t["tool"] for t in ans.trace))
+            with st.expander(f"Worked through {len(ans.trace)} step{'s' if len(ans.trace) != 1 else ''}", expanded=False):
+                st.caption("Tools: " + ", ".join(tools))
         st.markdown(split_follow_ups(ans.text)[0])
     for step in ans.trace:
         chart(step["result"].get("chart"))
@@ -404,9 +515,8 @@ def show_answer(ans, text_done: bool = False):
                                key=f"dl{hash(p)}{id(step)}")
     sources = {(s.get("title"), s.get("url")) for step in ans.trace for s in step["result"].get("sources", []) or []}
     if sources:
-        st.html("".join(chip(t, "src auto", u) for t, u in sorted(sources, key=lambda x: x[0] or "")))
-    if ans.trace:
-        st.caption(f"Tools used: {', '.join(dict.fromkeys(t['tool'] for t in ans.trace))}")
+        st.html('<div class="loa-srcs"><span>Sources</span>'
+                + "".join(chip(t, "src auto", u) for t, u in sorted(sources, key=lambda x: x[0] or "")) + "</div>")
 
 
 # Runs in the page itself (not in the component's iframe, which Streamlit re-creates on every rerun and
@@ -431,25 +541,61 @@ FOLLOW_CORE = r"""(function () {
   }
   function atBottom(c) { return c.scrollHeight - c.scrollTop - c.clientHeight < NEAR; }
   function isFollowing(c) { return follow.has(c) ? follow.get(c) : true; }
+  function chatBox(c) {
+    // the chat box this container scrolls above: the one inside it (the side panel), else the page's own
+    const boxes = [...doc.querySelectorAll("[data-testid='stChatInput']")];
+    return boxes.filter((b) => c.contains(b)).pop() || boxes.pop();
+  }
   function latestButton(c, show) {
     let b = c.__loaLatest;
     if (!b) {
       b = doc.createElement("button");
-      b.innerHTML = ARROW + " Jump to latest";
+      b.innerHTML = ARROW;
+      b.title = "Jump to latest";
       b.className = "loa-latest";
-      b.style.cssText = "position:fixed;z-index:1000;border:1px solid #1B3A5C;background:#fff;color:#1B3A5C;display:inline-flex;align-items:center;gap:4px;"
-        + "border-radius:999px;padding:5px 14px;font-size:12px;cursor:pointer;box-shadow:0 1px 6px rgba(0,0,0,.2);display:none";
       b.addEventListener("click", () => { follow.set(c, true); c.scrollTo({ top: c.scrollHeight, behavior: "smooth" }); b.style.display = "none"; });
       doc.body.appendChild(b);
       c.__loaLatest = b;
     }
-    if (show) {  // float it over the lower middle of the container it belongs to (the page or the side panel)
-      const r = c.getBoundingClientRect();
-      b.style.left = Math.round(r.left + r.width / 2 - 60) + "px";
-      b.style.top = Math.round(Math.min(r.bottom, window.innerHeight) - 56) + "px";
+    if (show) {  // a round arrow 12px above the chat box, centred on it
+      const box = chatBox(c);
+      const r = box ? box.getBoundingClientRect() : c.getBoundingClientRect();
+      b.style.left = Math.round(r.left + r.width / 2 - 16) + "px";
+      b.style.top = Math.round((box ? r.top : Math.min(r.bottom, window.innerHeight)) - 44) + "px";
     }
-    b.style.display = show ? "inline-block" : "none";
+    b.style.display = show ? "inline-flex" : "none";
   }
+  // While an answer streams, the Stop button (a Streamlit button inside the answer) is laid over the chat box's
+  // send button, so stopping is where sending was; the send button itself is hidden meanwhile.
+  function placeStop() {
+    const stop = doc.querySelector("[class*='st-key-stop_']");
+    const subs = doc.querySelectorAll("[data-testid='stChatInputSubmitButton']");
+    const sub = subs[subs.length - 1];
+    if (!sub) { return; }
+    if (!stop) { sub.style.visibility = ""; return; }
+    const r = sub.getBoundingClientRect();
+    sub.style.visibility = "hidden";
+    stop.style.cssText = "position:fixed;z-index:1002;margin:0;width:" + r.width + "px;height:" + r.height + "px;left:" + r.left + "px;top:" + r.top + "px;";
+  }
+  window.addEventListener("resize", placeStop);
+  // Copy: the button in an answer's action row copies the answer's text (not the work line or the sources)
+  doc.addEventListener("click", (e) => {
+    const btn = e.target.closest && e.target.closest(".loa-copy");
+    if (!btn) { return; }
+    const msg = btn.closest("[data-testid='stChatMessage']");
+    if (!msg) { return; }
+    const parts = [...msg.querySelectorAll("[data-testid='stMarkdown']")]
+      .filter((m) => !m.closest("[data-testid='stExpander']") && !m.closest("[class*='st-key-acts_']"))
+      .map((m) => m.innerText.trim()).filter(Boolean);
+    const text = parts.join("\n\n");
+    const done = () => { btn.classList.add("done"); setTimeout(() => btn.classList.remove("done"), 1500); };
+    if (navigator.clipboard && navigator.clipboard.writeText) { navigator.clipboard.writeText(text).then(done, done); }
+    else {
+      const ta = doc.createElement("textarea"); ta.value = text; doc.body.appendChild(ta); ta.select();
+      try { doc.execCommand("copy"); } catch (err) {}
+      ta.remove(); done();
+    }
+  });
   doc.addEventListener("scroll", (e) => {
     const c = e.target === doc ? doc.scrollingElement : e.target;
     if (!c || !c.scrollHeight) { return; }
@@ -460,6 +606,7 @@ FOLLOW_CORE = r"""(function () {
   const seen = new Set();
   const observer = new MutationObserver((muts) => {
     seen.clear();
+    placeStop();
     for (const m of muts) {
       const t = m.target.nodeType === 1 ? m.target : m.target.parentElement;
       if (!t) { continue; }
@@ -510,7 +657,7 @@ FOLLOW_JS = """<script>
 def follow_output():
     """Install the follow-the-output scroll behaviour on every chat surface (once per page load). The code travels
     in the iframe's srcdoc as a data attribute it reads and installs into the page itself."""
-    core = FOLLOW_CORE.replace("ARROW", json.dumps(icon_svg("arrow-down", 14)), 1)
+    core = FOLLOW_CORE.replace("ARROW", json.dumps(icon_svg("arrow-down", 16).replace(' class="loa-ic"', "")), 1)
     loader = FOLLOW_JS.replace('window.frameElement.getAttribute("data-follow")', "CODE")
     components.html(f"<script>const CODE = {json.dumps(core)};</script>" + loader, height=0)
 
@@ -552,11 +699,9 @@ def open_copilot(context=None):
     copilot()
 
 
-@st.dialog("Copilot", position="right", width="medium", on_dismiss="rerun")
+@st.dialog("Copilot", position="right", width="small", on_dismiss="rerun")
 def copilot():
     st.session_state["_in_dialog"] = True
-    if st.button("", icon=material("x"), key="fab_close", help="Close · Esc"):
-        st.rerun()  # a full rerun closes the panel; the page underneath keeps its place and the chat is saved
     copilot_body()
 
 
@@ -564,10 +709,70 @@ def _rerun():
     st.rerun(scope="fragment" if st.session_state.get("_in_dialog") else "app")
 
 
+SETUP_PILL = "Set up my focus"
+
+
+def _pick(key: str):
+    """A pill was chosen (an example question, a follow-up): it becomes the next question, and the pill resets so
+    the same one can be chosen again later."""
+    v = st.session_state.get(key)
+    st.session_state[key] = None
+    if v == SETUP_PILL:
+        st.session_state["copilot_ctx"] = {"kind": "setup"}
+    elif v:
+        st.session_state["cp_ask"] = v
+
+
+def top_bar(ctx, chat_id, sfx: str):
+    """The bar that stays at the top while the thread scrolls: 'Copilot' with what it is looking at on the left;
+    History and New chat on the right (the side panel adds the name and a close button, and shows icons only)."""
+    looking = {"setup": "setting up your focus", "signal": ctx.get("title", "")}.get(
+        ctx["kind"], PAGE_TITLES.get(ctx.get("page", ""), ctx.get("page", "")))
+    label = "About" if ctx["kind"] == "signal" else "Looking at"
+    panel = sfx == "d"
+    with st.container(key=f"cp_top_{sfx}", horizontal=True, vertical_alignment="center", gap="small"):
+        who = f"<small>{esc(user)}</small>" if panel and user != "Guest" else ""
+        st.html(f'<div class="loa-cp-title">Copilot {who}<span class="loa-chip">{label}: {esc(looking)}</span></div>',
+                width="stretch")
+        if panel:
+            with st.popover("", icon=material("user"), help="Who is asking; change the name", width="content"):
+                who_card(sfx, compact=True)
+        with st.popover("" if panel else "History", icon=material("history"), help="Your saved conversations",
+                        width="content"):
+            history_list(chat_id, sfx)
+        if st.button("" if panel else "New chat", icon=material("plus"), key=f"newchat_{sfx}",
+                     help="Start a clean conversation", width="content"):
+            open_chat(None)
+            if not panel:
+                st.session_state["copilot_ctx"] = {"kind": "page", "page": "copilot"}
+            _rerun()
+        if panel and st.button("", icon=material("x"), key="fab_close", help="Close · Esc", width="content"):
+            st.rerun()  # a full rerun closes the panel; the page underneath keeps its place and the chat is saved
+    # on a phone the context chip leaves the bar for its own line under it (it scrolls away with the thread)
+    st.html(f'<div class="loa-ctx-line"><span class="loa-chip">{label}: {esc(looking)}</span></div>')
+
+
+def empty_state(ctx, intro: str, suggestions: list[str], sfx: str):
+    """A new chat: a greeting in the middle of the space and the example questions as pills (no message)."""
+    name = user if user != "Guest" else "there"
+    if ctx["kind"] == "setup":
+        head, sub = "Tell me what you do, in one sentence.", intro
+    elif ctx["kind"] == "signal":
+        head, sub = ctx.get("title", "This signal"), "Ask anything about this signal; every number comes with its source."
+    else:
+        head = f"Hi {name}. What do you want to know about London offices?"
+        sub = "I can see what's on your screen, and every number comes with its source."
+    with st.container(key=f"cp_empty_{sfx}"):
+        st.html(f'<div class="loa-cp-hello">{esc(head)}</div><div class="loa-cp-sub">{esc(sub)}</div>')
+        opts = ([SETUP_PILL] if ctx["kind"] == "page" else []) + [q for q in suggestions if q != SETUP_PILL]
+        key = f"cs_{sfx}_{ctx['kind']}"
+        st.pills("Suggestions", opts, key=key, label_visibility="collapsed", on_change=_pick, args=(key,))
+
+
 def copilot_body(full: bool = False, question: str | None = None, own_input: bool = True):
-    """The conversation: a header with what the Copilot is looking at, History and New chat; the saved chat; the
-    example questions only while the chat is empty; the input box at the bottom (the page passes its own
-    pinned one in `question`; the side panel makes one here)."""
+    """The conversation: a top bar that stays put (what the Copilot is looking at, History, New chat); the saved
+    chat in a centred column; the example questions only while the chat is empty; the chat box at the bottom
+    (the page passes its own pinned one in `question`; the side panel makes one here)."""
     ctx = st.session_state.get("copilot_ctx", {"kind": "page", "page": "monitor"})
     sfx = "d" if st.session_state.get("_in_dialog") else "p"
     if user == "Guest" and not st.session_state.get("skip_who"):
@@ -575,56 +780,37 @@ def copilot_body(full: bool = False, question: str | None = None, own_input: boo
         return
     chat_id, turns = current_chat()
     turns = absorb_partial(chat_id, turns)
-    head = st.columns([3.2, 1.2, 1.25, 1.25], vertical_alignment="center")
-    looking = {"setup": "setting up your focus", "signal": ctx.get("title", "")}.get(
-        ctx["kind"], PAGE_TITLES.get(ctx.get("page", ""), ctx.get("page", "")))
-    head[0].html(f'<div class="loa-box">Looking at: <b>{esc(looking)}</b></div>')
-    with head[1].popover(user if user != "Guest" else "Who?", width="stretch", help="Who is asking; change the name"):
-        who_card(sfx, compact=True)
-    with head[2].popover("History", width="stretch", help="Your saved conversations"):
-        history_list(chat_id, sfx)
-    if head[3].button("New chat", width="stretch", key=f"newchat_{sfx}", help="Start a clean conversation"):
-        open_chat(None)
-        _rerun()
+    top_bar(ctx, chat_id, sfx)
     if ctx["kind"] == "setup":
-        intro = ("Tell me what you do in one sentence and I'll set up your 'For you' view: submarkets, measures, "
-                 "how much to show and alerts. Nothing changes until you press Apply. The team view stays as it is.")
+        intro = ("I'll set up your 'For you' view: submarkets, measures, how much to show and alerts. Nothing "
+                 "changes until you press Apply. The team view stays as it is.")
         suggestions = SETUP_EXAMPLES
     elif ctx["kind"] == "signal":
         intro, suggestions = "", SIGNAL_SUGGESTIONS
     else:
-        intro = ("Ask me anything about the London office market. I can see what's on your screen, and every "
-                 "number I give you comes with its source. You can also change your own view, e.g. 'more "
-                 "Fitzrovia, less macro'.")
+        intro = ""
         suggestions = PAGE_SUGGESTIONS.get(ctx.get("page", ""), team["questions"][:4])
-    clicked = None
-    if not turns and intro:
-        st.markdown(intro)
-    thread = st.container()  # the conversation; the input box sits below it, pinned to the bottom
+    clicked = st.session_state.pop("cp_ask", None)  # a pill, Ask again or the regenerate button chose a question
+    thread = st.container()  # the conversation; the chat box sits below it, pinned to the bottom
     sugg = st.empty()  # example questions or follow-ups go here, under the thread, but only when nothing is being asked
     if own_input:
         question = st.chat_input(chat_placeholder(ctx), key="copilot_input", max_chars=2000)
-    if not question:
+    if not question and not clicked:
         with sugg.container():
             if not turns:  # the examples belong to a new chat; afterwards only the last answer's own follow-ups show
-                cols = [st] * 2
-                for i, q in enumerate(suggestions):
-                    if cols[i % 2].button(q, key=f"cs{q}", width="stretch"):
-                        clicked = q
+                empty_state(ctx, intro, suggestions, sfx)
             elif turns[-1]["role"] == "assistant" and turns[-1]["content"].endswith("*Stopped.*") and len(turns) > 1:
                 if st.button("Ask again", icon=material("refresh-cw"), key=f"again{len(turns)}"):
                     clicked = turns[-2]["content"]
             elif turns[-1]["role"] == "assistant" and "answer" in turns[-1]:
                 _, follow_ups = split_follow_ups(turns[-1]["answer"].text)
                 if follow_ups:
-                    st.html(kicker("Follow up"))
-                    cols = st.columns(len(follow_ups))
-                    for i, q in enumerate(follow_ups):
-                        if cols[i].button(q, key=f"fu{len(turns)}_{i}", width="stretch"):
-                            clicked = q
+                    st.html('<div class="loa-fu">Follow up</div>')
+                    key = f"fu_{sfx}_{len(turns)}"
+                    st.pills("Follow up", follow_ups, key=key, label_visibility="collapsed", on_change=_pick, args=(key,))
     question = question or clicked
     if clicked:
-        sugg.empty()  # a question is on its way: the buttons leave the screen, as a typed question would
+        sugg.empty()  # a question is on its way: the pills leave the screen, as a typed question would
     follow_output()
     with thread:
         copilot_thread(turns, ctx, question)
@@ -661,8 +847,8 @@ def become(name: str):
 
 
 def chat_placeholder(ctx) -> str:
-    return {"setup": "Describe your job in one sentence…", "signal": "Ask about this signal…"}.get(
-        ctx["kind"], "Ask about any London submarket… (Enter sends, Shift+Enter for a new line)")
+    return {"setup": "Describe your job in one sentence", "signal": "Ask about this signal"}.get(
+        ctx["kind"], "Ask about any London submarket")
 
 
 def history_list(chat_id, sfx):
@@ -693,39 +879,55 @@ def absorb_partial(chat_id, turns):
     return turns
 
 
-def share_controls(turn):
-    """A Copilot answer stays private to the person who asked until they share it: 'Share to team' puts the
-    question and answer in team activity with their name and the time; 'Unshare' takes it out again."""
+def action_row(turn, latest: bool, prev_question: str, sfx: str):
+    """Under an answer: Copy, thumbs up, thumbs down, Ask again, Share to team, as 32px icon buttons. The latest
+    answer's row stays on screen; an older row appears when the pointer is over that answer. An answer stays
+    private to the person who asked until they share it; 'Shared to team · Undo' takes it out again."""
     mid = turn.get("id")
     if not mid:
         return
     shared = app.store.shared_by(mid)
-    c = st.columns([1.4, 4.6], vertical_alignment="center")
-    if shared:
-        if c[0].button("Unshare", icon=material("link-off"), key=f"unshare{mid}", type="tertiary",
-                       help="Take this answer out of team activity"):
-            app.store.unshare_answer(mid)
+    vote = app.store.answer_vote(mid, user)
+    with st.container(key=f"acts_{'last_' if latest else ''}{sfx}{mid}", horizontal=True, vertical_alignment="center",
+                      gap=None):
+        st.html(f'<button class="loa-copy" title="Copy the answer">{ic("copy", 16)}</button>')
+        if st.button("", icon=material("thumbs-up"), key=f"up{sfx}{mid}", help="Good answer",
+                     type="primary" if vote > 0 else "tertiary"):
+            app.store.vote_answer(mid, user, 0 if vote > 0 else 1)
             _rerun()
-        c[1].caption(f"Shared with the team by {shared['author']} · {lib.when(shared['ts'])}")
-    else:  # the chat on screen is always the viewer's own
-        with c[0].popover("Share to team", icon=material("share-2"),
-                          help="Only you can see this answer until you share it; sharing puts the question, the "
-                               "answer, its charts and sources in team activity with your name"):
-            note = st.text_input("Why is it worth a look? (optional)", key=f"note{mid}", placeholder="e.g. IC needs this")
-            if st.button("Share", key=f"share{mid}", type="primary"):
-                app.store.share_answer(mid, user, note.strip())
+        if st.button("", icon=material("thumbs-down"), key=f"dn{sfx}{mid}", help="Not useful",
+                     type="primary" if vote < 0 else "tertiary"):
+            app.store.vote_answer(mid, user, 0 if vote < 0 else -1)
+            _rerun()
+        if prev_question and st.button("", icon=material("refresh-cw"), key=f"re{sfx}{mid}", type="tertiary",
+                                       help="Ask this question again"):
+            st.session_state["cp_ask"] = prev_question
+            _rerun()
+        if shared:
+            st.html(f'<span class="loa-shared">Shared to team · {lib.when(shared["ts"])}</span>')
+            if st.button("Undo", key=f"undo{sfx}{mid}", type="tertiary", help="Take this answer out of team activity"):
+                app.store.unshare_answer(mid)
                 _rerun()
-
+        else:  # the chat on screen is always the viewer's own
+            with st.popover("", icon=material("share-2"),
+                            help="Share to team: only you can see this answer until you share it; sharing puts the "
+                                 "question, the answer, its charts and sources in team activity with your name"):
+                note = st.text_input("Why is it worth a look? (optional)", key=f"note{mid}", placeholder="e.g. IC needs this")
+                if st.button("Share", key=f"share{mid}", type="primary"):
+                    app.store.share_answer(mid, user, note.strip())
+                    _rerun()
 
 
 def copilot_thread(turns, ctx, question):
-    for turn in turns:
+    sfx = "d" if st.session_state.get("_in_dialog") else "p"
+    for i, turn in enumerate(turns):
         with st.chat_message(turn["role"]):
             if turn["role"] == "user" or "answer" not in turn:
                 st.markdown(turn["content"])
             else:
                 show_answer(turn["answer"])
-                share_controls(turn)
+                prev = turns[i - 1]["content"] if i and turns[i - 1]["role"] == "user" else ""
+                action_row(turn, latest=(i == len(turns) - 1 and not question), prev_question=prev, sfx=sfx)
     if question and ctx["kind"] == "setup":
         say("user", question)
         with st.spinner("Drafting your setup…"):
@@ -810,8 +1012,8 @@ def stream_answer(asked: str, chat_id: str | None = None, question: str = ""):
     stream = engine.ask_streaming(asked, user, chat_id)
     tools = []
     stop = st.empty()
-    stop.button("Stop", icon=material("square"), key=f"stop_{chat_id}", type="tertiary",
-                help="Keep what has been written so far and stop")
+    stop.button("", icon=material("square"), key=f"stop_{chat_id}", type="tertiary",
+                help="Stop: keep what has been written so far")
     st.session_state["partial"] = {"q": question or asked, "chat": chat_id, "text": ""}
     shown = {"text": ""}
 
@@ -1254,9 +1456,12 @@ def monitor_page():
 def copilot_page():
     st.session_state["page"] = "copilot"
     st.session_state["_in_dialog"] = False
-    st.session_state["copilot_ctx"] = {"kind": "page", "page": "copilot"}
-    st.html('<div class="loa-h1">Ask Copilot</div><div class="loa-sub">Judge: ask, compare, drill down. '
-            'Every number comes with its source.</div>')
+    if st.session_state.get("copilot_ctx", {}).get("kind") != "setup":  # a setup started from the page carries on
+        st.session_state["copilot_ctx"] = {"kind": "page", "page": "copilot"}
+    st.html('<span class="loa-cp-page"></span>')  # the stylesheet's hook for the page-only layout rules
+    st.html('<div class="loa-notice">Evaluation PoC: market figures are restated from public Knight Frank reports '
+            '(evaluation only, not for AI or commercial use); Bank Rate and news are collected live; internal deals '
+            'and colleague names are demo data.</div>')
     # The input box is made here, at page level, so Streamlit pins it to the bottom of the window.
     question = st.chat_input(chat_placeholder(st.session_state["copilot_ctx"]), key="copilot_input", max_chars=2000)
     copilot_body(full=True, question=question, own_input=False)
