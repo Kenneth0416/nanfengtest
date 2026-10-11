@@ -118,9 +118,7 @@ SCOPE [class*="st-key-cp_top_"] { padding:10px 0 8px 0; margin-bottom:4px; }
 SCOPE [class*="st-key-cp_top_"] { flex-wrap:nowrap !important; }
 SCOPE [class*="st-key-cp_top_"] > .stElementContainer:has(> .stHtml) { flex:1 1 auto; width:auto !important; min-width:0; }
 SCOPE [class*="st-key-cp_top_"] > .stElementContainer:has(> .stHtml) .loa-cp-title { flex-wrap:nowrap; overflow:hidden; }
-SCOPE [class*="st-key-cp_top_"] .loa-cp-title .loa-deck-row { display:flex; align-items:center; gap:12px; flex-wrap:wrap; font-size:14px; }
-.loa-deck-row .loa-muted { font-size:13px; }
-.loa-chip { overflow:hidden; text-overflow:ellipsis; max-width:260px; }
+SCOPE [class*="st-key-cp_top_"] .loa-cp-title .loa-chip { overflow:hidden; text-overflow:ellipsis; max-width:260px; }
 SCOPE .loa-cp-title { font-size:16px; font-weight:700; color:var(--ink); display:flex; align-items:center; gap:10px; flex-wrap:wrap; line-height:32px; }
 SCOPE .loa-cp-title .loa-chip { margin:0; font-weight:400; line-height:20px; background:var(--surface); border:1px solid var(--line); }
 SCOPE .loa-cp-title small { font-size:12px; font-weight:400; color:var(--ink3); }
@@ -2205,31 +2203,27 @@ def deck_editor():
                     "const t=parent.document.querySelector('.st-key-deck_thread'); if (t) t.scrollTop=1e6;</script>", height=0)
 
 
-def deck_panel(fmt):
-    """The slides stay folded on the page: one row with a status line and a single Slides button. The button
-    opens the floating editor, building the deck first when none exists for this data; the thumbnails, the
-    theme, the downloads and the conversation all live in that window."""
+def deck_button(fmt, col):
+    """The slides stay folded: one button beside Download (.md). It opens the floating editor, building the deck
+    first when none exists for this data; thumbnails, theme, downloads and the conversation all live there."""
     if (w := st.session_state.pop("deck_theme_want", None)) and w[0] == fmt:
         st.session_state[f"deck_theme_{fmt}"] = w[1]  # the editor changed the theme: follow it
     theme = st.session_state.setdefault(f"deck_theme_{fmt}", "data-white" if fmt == "ic" else "navy-gold")
     hit = cached_deck(fmt, theme)
     d = (hit or {}).get("data") or {}
     if hit:
-        label, _plain = DECK_MSG[d["how"]]
         edits = len(d.get("edits") or [])
-        status = (f'{chip(label, "ok" if d["how"] == "copilot" else "warn")}{len(d.get("titles") or [])} slides · '
-                  f'{esc(DECK_THEMES.get(d["theme"], d["theme"]))} · built {esc(when(hit["ts"]))}'
-                  + (f' · edited {edits} time{"s" if edits != 1 else ""}' if edits else ""))
+        tip = (f"{len(d.get('titles') or [])} slides · {DECK_THEMES.get(d['theme'], d['theme'])} · "
+               f"{'chosen by the Copilot' if d['how'] == 'copilot' else 'picked by rules'} · built {when(hit['ts'])}"
+               + (f" · edited {edits} time{'s' if edits != 1 else ''}" if edits else ""))
     else:
-        status = ("Not built yet · the Copilot reads this week's data and picks the slides, layouts and titles"
-                  if engine.ready else "Not built yet · picked by rules from this week's data (Copilot offline)")
-    with st.container(border=True, key=f"deck_row_{fmt}", horizontal=True, vertical_alignment="center", gap="small"):
-        st.html(f'<div class="loa-deck-row"><b>Slides</b><span class="loa-muted">{status}</span></div>', width="stretch")
-        if st.button("Open slides" if hit else "Build slides", key=f"mk_deck_{fmt}", width="content",
-                     type="secondary" if hit else "primary", icon=material("presentation") if hit else None,
-                     help=("Thumbnails, a big preview, downloads and a chat to change the slides" if hit else
-                           "Plans a 3-6 slide deck from this week's data; you watch each slide being laid out")):
-            open_deck_editor(fmt, theme, build=not hit)
+        tip = "Plans a 3-6 slide deck from this week's data; you watch each slide being laid out"
+    if col.button("Slides" if hit else "Build slides", key=f"mk_deck_{fmt}", width="stretch",
+                  type="secondary", icon=material("presentation"), help=tip):
+        open_deck_editor(fmt, theme, build=not hit)
+
+
+def deck_panel(fmt):
     if (st.session_state.get("deck_ed") or {}).get("open"):
         deck_editor()
 
@@ -2251,7 +2245,7 @@ def brief_page():
                 "Monitor to choose them.")
     if st.button("Add more from Monitor", type="tertiary", key="more_from_monitor"):
         goto("monitor")
-    row = st.columns([3.8, 1.2], vertical_alignment="center")
+    row = st.columns([2.8, 1.1, 1.1], vertical_alignment="center")
     with row[0]:
         fmt = st.segmented_control("Write it as", list(fx.BRIEF_FORMATS), default="board",
                                    format_func=fx.BRIEF_FORMATS.get, key="brief_fmt") or "board"
@@ -2268,6 +2262,7 @@ def brief_page():
         app.store.save_cached("brief", fp, brief)
         made = app.store.cached("brief", fp)["ts"]
     row[1].download_button("Download (.md)", brief, file_name="london-office-team-brief.md", width="stretch")
+    deck_button(fmt, row[2])
     deck_panel(fmt)
     with st.container(border=True):
         st.html(f'<div class="loa-cobrand">{brand_img("cobrand-nanfung.svg", "", "London Office Market Agent · Nan Fung Group")}'
