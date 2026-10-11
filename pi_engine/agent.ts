@@ -81,8 +81,13 @@ async function main() {
 	});
 	function onEvent(ev: any) {
 		{
-			if (ev.type === "message_start") inMessage = 0;
-			else if (ev.type === "message_update") {
+			if (ev.type === "message_start") {
+				// some providers put the first piece of the answer in the opening message itself, not in a delta:
+				// send it, or the answer loses its first words (and an opening ** its pair)
+				inMessage = 0;
+				const t = textOf(ev.message);
+				if (t) { streamed += t.length; inMessage += t.length; emit({ type: "delta", text: t }); }
+			} else if (ev.type === "message_update") {
 				for (const ch of ev.changes) {
 					if (ch.type === "text_delta") { streamed += ch.delta.length; inMessage += ch.delta.length; emit({ type: "delta", text: ch.delta }); }
 					else if (ch.type === "block" && ch.block?.type === "text" && ch.block.text && inMessage === 0) {
