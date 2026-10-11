@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+import threading
 from pathlib import Path
 
 from .classifier import Classifier
@@ -78,11 +79,28 @@ class App:
         from .focus import defaults
         return self.store.focus(user) or defaults(self.config, user)
 
-    def ensure_data(self):
-        if not self.store.q("SELECT 1 FROM observations LIMIT 1"):
-            self.refresh()
-        else:
-            self.refresh_if_due()
+    def ensure_data(self, background: bool = False):
+        """Data for the pages. With `background` (the web app) the open-data collection that is due runs in a
+        thread of its own, so the first page opens at once instead of waiting for every feed; a first start
+        loads the seed snapshot right away so there is something to show. The pages see the new data on their
+        next run."""
+        from .library import auto_due
+        empty = not self.store.q("SELECT 1 FROM observations LIMIT 1")
+        if not background:
+            return self.refresh() if empty else self.refresh_if_due()
+        if empty:
+            refresh(self.ctx, [c for c in self.connectors if c.id == "seed_research"])
+            self.seed_internal()
+            if not self.live:
+                return None
+        if empty or auto_due(self.store, self.config):
+            def collect():  # its own App: its own database connection, never shared with the page's
+                try:
+                    App(self.root, self.live).refresh()
+                except Exception as e:  # noqa: BLE001
+                    print(f"[collect] background collection failed: {e}", flush=True)
+            threading.Thread(target=collect, daemon=True, name="daily-collection").start()
+        return None
 
     def call(self, tool: str, args: dict, role: str | None = None) -> dict:
         if role:

@@ -365,7 +365,7 @@ def avatars(names, me="") -> str:
 @st.cache_resource
 def get_app():
     app = App()
-    app.ensure_data()
+    app.ensure_data(background=True)  # due open-data collection runs behind the page, not before it
     return app, Engine(app)
 
 
@@ -486,8 +486,7 @@ def when(ts: str) -> str:
 def sidebar():
     global user
     with st.sidebar:
-        st.html(brand_img("logo-horizontal.svg", "loa-logo", "London Office Market Agent")
-                + '<div class="loa-logo-cap">Prototype · sample data</div>')
+        st.html(brand_img("logo-horizontal.svg", "loa-logo", "London Office Market Agent"))
         c = st.columns([2.4, 2.1], vertical_alignment="center")
         c[0].html(f'<div class="loa-me">{ic("user", 15, "accent")}<b>{esc(user)}</b></div>')
         with c[1].popover("Change", width="stretch", help="Who is using this browser: no login, pick a name once"):
@@ -508,14 +507,68 @@ def sidebar():
                      icon=material("file-text"), help="Report: board and IC outputs")
         st.page_link(PAGE_OBJ["sources"], label=f"Sources · {to_check} to check" if to_check else "Sources",
                      icon=material("database"), help="Data the agent maintains")
+        st.page_link(PAGE_OBJ["help"], label="Help", icon=":material/help:", help="How to use the app, step by step")
         st.html(f"""{kicker("Team")}
 <div class="loa-team"><b>{esc(team['name'])}</b><div style="margin:6px 0 0 0">{avatars(colleagues(), user)}</div></div>""")
-        st.caption(f"**Data up to:** {an.period_label(an.latest_period(app.store))}")
-        with st.expander("Technical details"):
-            st.caption(f"Engine: {engine.status}")
-            st.caption(f"PDF reader: {app.vision.model if getattr(app.vision, 'available', False) else 'rule-based text reading'}")
         st.html(f'<div class="loa-builtfor">{kicker("Built for")}'
                 + brand_img("nanfung/nanfung-logo-color.svg", "", "Nan Fung Group") + "</div>")
+
+
+HELP_DIR = Path(__file__).resolve().parent / "assets" / "help"
+HELP_OUTLINE = [  # shown until the illustrated guide is in assets/help/
+    ("Monitor", "What changed this week for the team, as signal cards. Each card says what moved, by how much, "
+                "and why it matters, with its source. **Add to brief** puts a signal in the team brief; "
+                "**Set up my focus** makes a 'For you' view of the submarkets and measures you follow."),
+    ("Ask Copilot", "Ask about the market in plain English or Chinese. The answer streams in with every figure "
+                    "linked to its source; **Stop** keeps what is written. Your conversations are saved under "
+                    "your name, and **Share to team** shows an answer to colleagues."),
+    ("Team brief", "The week's brief, written from the signals the team added, as a board summary or an IC paper "
+                   "section. **Word** and **PDF** download it as a research note; **Build slides** opens the "
+                   "slide editor."),
+    ("Slides", "Change the deck by asking (\"swap slides 2 and 3\", \"theme forest\"). **Undo** and the version list "
+               "go back; **Download .pptx** and **PDF** take the deck away."),
+    ("Sources", "One library for the team: open data collected automatically, reports colleagues upload, and the "
+                "company's own deals. Items that need a person to check are counted beside the name."),
+]
+
+
+def help_section(md: str):
+    """Markdown with ![caption](screenshots/x.png) images: text as text, each image full width with its caption."""
+    for part in re.split(r"(!\[[^\]]*\]\([^)]+\))", md):
+        m = re.fullmatch(r"!\[([^\]]*)\]\(([^)]+)\)", part.strip())
+        if m:
+            img = (HELP_DIR / m.group(2)).resolve()
+            if img.is_file() and HELP_DIR.resolve() in img.parents:
+                st.image(str(img), caption=m.group(1) or None, width="stretch")
+        elif part.strip():
+            st.markdown(part)
+
+
+def help_page():
+    st.session_state["page"] = "help"
+    page_header("Help", "How to use the London Office Market Agent, page by page.")
+    langs = {"en": ("English", HELP_DIR / "help.md"), "zh": ("中文", HELP_DIR / "help.zh-TW.md")}
+    have = {k: v for k, v in langs.items() if v[1].exists()}
+    if have:
+        pick = next(iter(have))
+        if len(have) > 1:
+            pick = st.segmented_control("Language", list(have), format_func=lambda k: have[k][0], key="help_lang",
+                                        default=pick, label_visibility="collapsed") or pick
+        text = re.sub(r"\A\s*# .*\n", "", have[pick][1].read_text(encoding="utf-8"))  # the page has its own title
+        heads = re.findall(r"^## (.+)$", text, flags=re.M)
+        if heads:
+            st.html('<div class="loa-muted">' + " · ".join(
+                f'<a href="#{re.sub(r"[^a-z0-9]+", "-", h.lower()).strip("-")}">{esc(h)}</a>' for h in heads) + "</div>")
+        help_section(text)
+    else:
+        for title, body in HELP_OUTLINE:
+            with st.container(border=True):
+                st.markdown(f"#### {title}")
+                st.markdown(body)
+    with st.expander("About this installation"):
+        st.caption(f"Data up to {an.period_label(an.latest_period(app.store))}")
+        st.caption(f"Copilot engine: {engine.status}")
+        st.caption(f"PDF reader: {app.vision.model if getattr(app.vision, 'available', False) else 'rule-based text reading'}")
 
 
 def goto(key: str, **state):
@@ -778,6 +831,29 @@ def _rerun():
     st.rerun()
 
 
+def clicked_meanwhile() -> bool:
+    """True when the person clicked something inside the side panel or the slide editor while this run is busy.
+    Both are dialogs, and Streamlit runs a dialog as a fragment: a click there is queued until the run in
+    progress ends instead of interrupting it, so Stop and the close button did nothing until a deck had finished
+    building. Long loops ask this between steps and give way (yield_to_clicks); the work itself carries on in
+    its own thread and the next run picks it up, or stops it when the click was Stop."""
+    try:
+        from streamlit.runtime.scriptrunner_utils.script_requests import ScriptRequestType
+        from streamlit.runtime.scriptrunner_utils.script_run_context import get_script_run_ctx
+        req = get_script_run_ctx(suppress_warning=True).script_requests
+        data = req._rerun_data
+        return (req._state == ScriptRequestType.RERUN and bool(data.fragment_id_queue)
+                and not data.is_fragment_scoped_rerun and not data.is_auto_rerun)
+    except Exception:  # noqa: BLE001  (outside a script run, or Streamlit changed its internals: never give way)
+        return False
+
+
+def yield_to_clicks():
+    """End this run now when a click is waiting, so it is handled at once (the click's own rerun follows)."""
+    if clicked_meanwhile():
+        st.rerun()
+
+
 SETUP_PILL = "Set up my focus"
 
 
@@ -959,6 +1035,9 @@ def running_job(slot: str = ""):
     p = st.session_state.get("partial")
     if p and p.get("slot", "") == slot:
         return p
+    r = st.session_state.get("resume" + slot)  # handed over by a run that gave way to a click (the close button)
+    if r and r.get("owner") == chat_owner():
+        return r
     return JOBS.get((chat_owner(), slot))
 
 
@@ -1157,6 +1236,7 @@ def stream_answer(asked: str, chat_id: str | None = None, question: str = "", st
 
     def pieces():
         for e in stream.events():
+            yield_to_clicks()  # Stop, close or a page link pressed in a dialog: handle it now, not at the end
             if e["event"] == "delta":
                 held = held_box["text"] + e["text"]
                 last = None
@@ -1762,11 +1842,18 @@ def paint_pages(pptx, folder, built, ui: EditorUI, on_page=None) -> dict:
     layouts = [s["layout"] for s in built["slides"]]
     ui.plan(titles, layouts)
     ui.say("Rendering the deck to PDF…")
-    pdf, why = _preview.render_pdf(pptx, folder)
+    out = {}
+    job = threading.Thread(target=lambda: out.update(r=_preview.render_pdf(pptx, folder)), daemon=True)
+    job.start()
+    while job.is_alive():  # LibreOffice takes a few seconds: stay responsive to Stop and the close button
+        job.join(0.2)
+        yield_to_clicks()
+    pdf, why = out.get("r") or ("", "PDF conversion failed")
     pages = []
     if pdf:
         total = _preview.page_count(pdf)
         for n in range(1, total + 1):
+            yield_to_clicks()
             p = _preview.render_page(pdf, n, folder)
             if not p:
                 break
@@ -2067,6 +2154,9 @@ def deck_editor():
     here about this deck. Build slides opens it too: the Copilot's planning streams into the conversation, every
     slide first appears as 'Planned', and each thumbnail fills in as that slide is laid out."""
     st.session_state["_in_dialog"] = True
+    if st.session_state.get("ed_close"):  # closed mid-run: leave the run going for "Slides · working…" to pick up
+        _close_editor()
+        st.rerun()
     ed = st.session_state.get("deck_ed") or {}
     fmt, theme = ed.get("fmt", "board"), ed.get("theme", "navy-gold")
     sfx = "e"
@@ -2362,27 +2452,27 @@ def report_buttons(fmt, fp, brief, docx_col, pdf_col):
         def wait():
             if report_files(fmt, fp, brief) is not None:
                 st.rerun()
-            st.button("Word · preparing…", disabled=True, width="stretch", key="rep_wait_docx",
+            st.button("Word…", disabled=True, width="stretch", key="rep_wait_docx", icon=material("file-text"),
                       help="Laying out the research note from this brief")
         with docx_col:
             wait()
-        pdf_col.button("PDF · preparing…", disabled=True, width="stretch", key="rep_wait_pdf",
+        pdf_col.button("PDF…", disabled=True, width="stretch", key="rep_wait_pdf", icon=":material/picture_as_pdf:",
                        help="Laying out the research note from this brief")
         return
     name = "london-office-ic-paper" if fmt == "ic" else "london-office-weekly-brief"
     if files.get("docx"):
         docx_col.download_button(
-            "Download Word", Path(files["docx"]).read_bytes(), file_name=f"{name}.docx", width="stretch",
+            "Word", Path(files["docx"]).read_bytes(), file_name=f"{name}.docx", width="stretch",
             mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document", key=f"dl_docx_{fmt}",
             icon=material("file-text"), help="The research note as an editable Word document, in the house style")
     else:
-        docx_col.button("Word unavailable", disabled=True, width="stretch", help=files.get("why") or "")
+        docx_col.button("Word", icon=material("file-text"), disabled=True, width="stretch", help=files.get("why") or "")
     if files.get("pdf") and Path(files["pdf"]).exists():
-        pdf_col.download_button("Download PDF", Path(files["pdf"]).read_bytes(), file_name=f"{name}.pdf",
+        pdf_col.download_button("PDF", Path(files["pdf"]).read_bytes(), file_name=f"{name}.pdf",
                                 mime="application/pdf", width="stretch", key=f"dl_pdf_{fmt}",
                                 icon=":material/picture_as_pdf:", help="The same research note as a PDF")
     else:
-        pdf_col.button("PDF unavailable", disabled=True, width="stretch", key=f"dl_pdf_off_{fmt}",
+        pdf_col.button("PDF", icon=":material/picture_as_pdf:", disabled=True, width="stretch", key=f"dl_pdf_off_{fmt}",
                        help=(files.get("why") or "LibreOffice is not installed here")
                        + ". The Word download has the same layout.")
 
@@ -2404,7 +2494,7 @@ def brief_page():
                 "Monitor to choose them.")
     if st.button("Add more from Monitor", type="tertiary", key="more_from_monitor"):
         goto("monitor")
-    row = st.columns([2.3, 1.05, 1.0, 1.0], vertical_alignment="center")
+    row = st.columns([2.6, 0.8, 0.8, 1.1], vertical_alignment="center")
     with row[0]:
         fmt = st.segmented_control("Write it as", list(fx.BRIEF_FORMATS), default="board",
                                    format_func=fx.BRIEF_FORMATS.get, key="brief_fmt") or "board"
@@ -2419,8 +2509,8 @@ def brief_page():
             return  # the page polls until the brief is there; switching pages does not stop the writing
     brief, made = hit["data"], hit["ts"]
     if brief.startswith("The brief could not be written"):
-        row[1].button("Download Word", disabled=True, width="stretch", key="dl_docx_off")
-        row[2].button("Download PDF", disabled=True, width="stretch", key="dl_pdf_off")
+        row[1].button("Word", disabled=True, width="stretch", key="dl_docx_off")
+        row[2].button("PDF", disabled=True, width="stretch", key="dl_pdf_off")
     else:
         report_buttons(fmt, fp, brief, row[1], row[2])
     deck_button(fmt, row[3])
@@ -2901,6 +2991,7 @@ PAGE_OBJ = {
                      url_path="brief"),
     "sources": st.Page(sources_page, title=f"Sources · {to_check} to check" if to_check else "Sources", icon=material("database"),
                        url_path="sources"),
+    "help": st.Page(help_page, title="Help", icon=":material/help:", url_path="help"),
 }
 nav = st.navigation(list(PAGE_OBJ.values()), position="hidden")
 sidebar()

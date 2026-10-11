@@ -38,6 +38,21 @@ class Footnotes:
                 + (f" - {u}" if u else "") for i, (t, u) in enumerate(self.items, 1)]
 
 
+def plain_words(text: str) -> str:
+    """Model phrasing a reader would trip over, put plainly: 'two unpre-let speculative schemes' becomes
+    'two speculative schemes with no pre-lets'."""
+    return re.sub(r"\bun-?pre-?let(?:ted)?\s+((?:speculative\s+)?(?:schemes?|buildings?|offices?|space))",
+                  lambda m: f"{m.group(1)} with no pre-let{'s' if m.group(1).endswith('s') else ''}", text, flags=re.I)
+
+
+def nice_date(iso: str) -> str:
+    """2026-06-18 as 18 Jun 2026, the way dates read everywhere else in the brief."""
+    try:
+        return date.fromisoformat(str(iso)[:10]).strftime("%d %b %Y").lstrip("0")
+    except ValueError:
+        return str(iso)
+
+
 def _signal(d: dict) -> Signal:
     d = {k: v for k, v in d.items() if k != "added_by"}
     d["evidence"] = [Evidence(**e) for e in d.get("evidence", [])]
@@ -94,10 +109,11 @@ def generate_brief(ctx, args):
             headline = ctx.llm.complete(
                 f"Write a 3-sentence headline for a {'investment committee paper' if fmt == 'ic' else 'board'} "
                 f"on the London office market. Use ONLY these facts and numbers, no others:\n{facts}",
-                system="You are a CRE research analyst. Plain English, no hype, no headings or markdown.")
+                system="You are a CRE research analyst. Plain English, no hype, no headings or markdown. "
+                       "No coined words: write 'speculative schemes with no pre-lets', never 'unpre-let'.")
             lines = [line.strip() for line in headline.strip().splitlines() if line.strip()]
             prose = [line for line in lines if not line.startswith("#")]  # drop heading lines the model adds
-            headline = " ".join(prose or [re.sub(r"^#+\s*", "", line) for line in lines])
+            headline = plain_words(" ".join(prose or [re.sub(r"^#+\s*", "", line) for line in lines]))
         except Exception:
             pass  # keep the rule-based headline
 
@@ -138,7 +154,7 @@ def generate_brief(ctx, args):
                *[f"- {s.title.removeprefix('Unverified tip: ')}. {s.detail}" for s in talk]]
     rate = ctx.store.q("SELECT * FROM macro WHERE indicator='bank_rate' ORDER BY date DESC LIMIT 1")
     if rate:
-        md += ["", "## Macro", f"Bank Rate {rate[0]['value']:.2f}% (as of {rate[0]['date']}) "
+        md += ["", "## Macro", f"Bank Rate {rate[0]['value']:.2f}% (as of {nice_date(rate[0]['date'])}) "
                f"{notes.ref('Bank of England Bank Rate', 'https://www.bankofengland.co.uk/boeapps/database/Bank-Rate.asp')}."]
     md += ["", "## Sources", *notes.markdown(),
            "", "_Figures restated from public research for this proof of concept; verify against the original before external use._"]

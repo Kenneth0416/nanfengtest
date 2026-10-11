@@ -266,11 +266,18 @@ def one_line(d: dict) -> str:
         bits.append(d["term"])
     if d.get("rent_free"):
         bits.append(f"{d['rent_free']} rent-free")
-    if d.get("floor_area"):
-        bits.append(d["floor_area"])
+    if d.get("floor_area"):  # "3rd floor, 9,800 sq ft": the floor is already in the property name, say it once
+        parts = [x.strip() for x in re.split(r",\s+", str(d["floor_area"])) if x.strip()]  # not 9,800
+        parts = [x for x in parts if x.lower() not in str(d.get("property", "")).lower()]
+        if parts:
+            bits.append(", ".join(parts))
     s = f"{d['property']}. " + ", ".join(bits)
     if d.get("date"):
-        s += f" ({d['date']})"
+        try:
+            when = date.fromisoformat(str(d["date"])[:10]).strftime("%d %b %Y").lstrip("0")
+        except ValueError:
+            when = d["date"]
+        s += f" ({when})"
     return s
 
 

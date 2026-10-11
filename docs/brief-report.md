@@ -1,6 +1,6 @@
 # The brief as a research note (Word and PDF)
 
-The Team brief page offers **Download Word** and **Download PDF** next to **Build slides**. Both are the same
+The Team brief page offers **Word** and **PDF** download buttons next to **Build slides**. Both are the same
 research note, laid out like a broker's research report in the Nan Fung co-brand. The PDF is LibreOffice's
 rendering of the .docx itself, so the two never differ.
 
@@ -18,8 +18,9 @@ What is on the pages:
   take-up, active requirements and investment, with the move against the previous quarter in green or red.
 - **Key numbers.** The brief's table with a navy header row that repeats on a new page; changes are coloured by
   whether they are good or bad for an owner of London offices.
-- **Charts.** Vacancy and take-up side by side, then prime rents by submarket. Each figure has a numbered caption
-  and a source line that uses the same [n] as the text.
+- **Charts.** Vacancy and take-up side by side, then prime rents by submarket, on a true quarterly axis: a quarter
+  the library has no figure for is a gap marked "no data" and named in the caption. Each figure has a numbered
+  caption and a source line that uses the same [n] as the text.
 - **The rest of the brief, as written.** Signals with an up or down marker and "Why it matters", our deals,
   market deals, market talk kept apart, macro, and the numbered sources with links.
 - **Important information.** About the note, the data (including Knight Frank's evaluation-only terms), unconfirmed

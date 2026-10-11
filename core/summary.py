@@ -70,7 +70,9 @@ def team_summary(store, signals: list) -> list[str]:
                    f"{an.period_label(inv['period'])}{prev}{_vs_lta(store, inv)}.")
     watch = next((s for s in signals if s.tone == "negative" and not is_tip(s) and s.kind != "data_quality"), None)
     if watch:
-        out.append(f"To watch: {watch.title[0].lower() + watch.title[1:]}"
+        names = set(tx.MARKET_PARENT) | set(tx.TOP_MARKETS)
+        proper = any(watch.title.startswith(m) for m in names) or watch.title[1:2].isupper() or watch.title[:1].isdigit()
+        out.append(f"To watch: {watch.title if proper else watch.title[0].lower() + watch.title[1:]}"
                    + (f" ({', '.join(watch.markets[:2])})" if watch.markets and watch.markets[0] not in watch.title
                       else "") + ".")
     return out

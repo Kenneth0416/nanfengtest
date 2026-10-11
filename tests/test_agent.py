@@ -154,6 +154,20 @@ def test_brief_downloads_as_a_branded_research_note(app, tmp_path):
         assert "LibreOffice" in out["why"]
 
 
+def test_research_note_details_read_cleanly():
+    """Missing quarters are gaps on a time axis, a deal says its floor once, dates read one way, no coined words."""
+    from core.internal import one_line
+    from skills.market_brief import report
+    from skills.market_brief.tools import nice_date, plain_words
+    series, gone = report.on_time_axis([{"period": "Q3 2024", "value": 9.1}, {"period": "Q2 2025", "value": 8.8}])
+    assert [d["value"] for d in series] == [9.1, None, None, 8.8] and gone == ["Q4 2024", "Q1 2025"]
+    line = one_line({"property": "25 Cabot Square, 3rd floor", "tenant": "Northbridge Capital",
+                     "floor_area": "3rd floor, 9,800 sq ft", "date": "2026-09-18"})
+    assert line.count("3rd floor") == 1 and "9,800 sq ft" in line and "(18 Sep 2026)" in line
+    assert nice_date("2026-06-18") == "18 Jun 2026" and report.nice_dates("as of 2026-10-08") == "as of 8 Oct 2026"
+    assert plain_words("two unpre-let speculative schemes") == "two speculative schemes with no pre-lets"
+
+
 def test_without_pi_the_app_says_how_to_start_the_agent(app, monkeypatch, tmp_path):
     """Pi is the only agent engine: with no Node packages there is no silent fallback, just a clear message."""
     from core.engine import Engine, PiNotReady

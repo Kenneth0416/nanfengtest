@@ -216,6 +216,14 @@ def _font(run, name=BODY, size=None, color=None, bold=None, italic=None, caps=Fa
     return run
 
 
+def _raise(run, half_points=5):
+    """A reference raised above the line at a size that stays legible (a true superscript shrinks it to ~5pt)."""
+    pos = OxmlElement("w:position")
+    pos.set(qn("w:val"), str(half_points))
+    run._r.get_or_add_rPr().append(pos)
+    return run
+
+
 def _field(p, code, size=8, color=MUTED):
     for kind, text in (("begin", None), (None, code), ("separate", None), (None, "1"), ("end", None)):
         r = p.add_run()
@@ -233,8 +241,22 @@ def _field(p, code, size=8, color=MUTED):
             r.text = text
 
 
-def rich(p, text, size=10, color=INK, bold=False, italic=False, font=BODY):
-    """Markdown-ish inline text: **bold**, _italic_, [n] as a small raised reference in navy."""
+def nice_dates(text: str) -> str:
+    """2026-10-08 as 8 Oct 2026, the date style of the rest of the note."""
+    from datetime import date as _d
+
+    def one(m):
+        try:
+            return _d.fromisoformat(m.group(0)).strftime("%d %b %Y").lstrip("0")
+        except ValueError:
+            return m.group(0)
+    return re.sub(r"(?<![\w/-])\d{4}-\d{2}-\d{2}(?![\w/-])", one, text)
+
+
+def rich(p, text, size=10, color=INK, bold=False, italic=False, font=BODY, sup=True):
+    """Markdown-ish inline text: **bold**, _italic_, [n] as a raised reference in navy (inline when `sup` is
+    False, as in a source line)."""
+    text = nice_dates(text)
     for chunk in re.split(r"(\*\*[^*]+\*\*|(?<![\w])_[^_]+_(?![\w])|\[\d+\]|\[internal\])", text):
         if not chunk:
             continue
@@ -243,8 +265,10 @@ def rich(p, text, size=10, color=INK, bold=False, italic=False, font=BODY):
         elif chunk.startswith("_") and chunk.endswith("_") and len(chunk) > 2:
             _font(p.add_run(chunk[1:-1]), font, size, MUTED if not bold else color, bold, True)
         elif REF.fullmatch(chunk):
-            r = _font(p.add_run(chunk), BODY, max(size - 2.5, 6), NAVY if chunk != "[internal]" else GOLD, True)
-            r.font.superscript = True
+            r = _font(p.add_run(chunk), BODY, max(size * 0.78, 7.5) if sup else size,
+                      NAVY if chunk != "[internal]" else GOLD, True)
+            if sup:
+                _raise(r)
         else:
             _font(p.add_run(chunk), font, size, color, bold, italic)
     return p
@@ -285,7 +309,30 @@ def heading(doc, text, size=16, n=None, label=None, new_page=False):
 # ------------------------------------------------------------------------------------------------------ charts
 def _short(period: str) -> str:
     m = re.match(r"(Q\d)\s+(\d{4})", period or "")
-    return f"{m.group(1)} '{m.group(2)[2:]}" if m else period
+    return f"{m.group(1)}\n'{m.group(2)[2:]}" if m else period
+
+
+def _qnum(period: str):
+    m = re.match(r"Q(\d)\s+(\d{4})", period or "")
+    return int(m.group(2)) * 4 + int(m.group(1)) - 1 if m else None
+
+
+def on_time_axis(data: list[dict]) -> tuple[list[dict | None], list[str]]:
+    """The series with one slot per quarter from the first to the last, None where the library has no figure,
+    so a missing quarter shows as a gap instead of two quarters drawn next to each other. Also the missing
+    quarters' names, for the caption."""
+    nums = [_qnum(d.get("period", "")) for d in data]
+    if not data or None in nums:
+        return list(data), []
+    by = dict(zip(nums, data))
+    slots = [by.get(q) for q in range(min(nums), max(nums) + 1)]
+    names = [f"Q{q % 4 + 1} {q // 4}" for q in range(min(nums), max(nums) + 1)]
+    return [d if d is not None else {"period": n, "value": None} for d, n in zip(slots, names)], \
+        [n for d, n in zip(slots, names) if d is None]
+
+
+def missing_quarters(data: list[dict]) -> list[str]:
+    return on_time_axis(data)[1]
 
 
 def _chart_png(kind, data, unit="", w=6.6, h=3.0) -> bytes:
@@ -305,23 +352,48 @@ def _chart_png(kind, data, unit="", w=6.6, h=3.0) -> bytes:
     ax.set_facecolor("white")
     label = {"fontsize": 7.5, "color": "#" + INK, "bbox": {"boxstyle": "square,pad=0.15", "fc": "white", "ec": "none"}}
     if kind in ("line", "column"):
-        xs = [_short(d["period"]) for d in data]
+        data, gaps = on_time_axis(data)
+        xs = list(range(len(data)))
         ys = [d["value"] for d in data]
+        have = [y for y in ys if y is not None]
         lta = [d.get("lta") for d in data if d.get("lta") is not None]
+        ax.set_xticks(xs, [_short(d["period"]) for d in data])
         if kind == "line":
-            ax.plot(xs, ys, color="#" + NAVY, lw=2.0, marker="o", ms=3.5, zorder=3)
+            seg = []  # a missing quarter breaks the line rather than being bridged
+            for x, y in zip(xs + [None], ys + [None]):
+                if y is None:
+                    if seg:
+                        ax.plot([a for a, _ in seg], [b for _, b in seg], color="#" + NAVY, lw=2.0, marker="o",
+                                ms=3.5, zorder=3)
+                    seg = []
+                else:
+                    seg.append((x, y))
             ax.plot(xs[-1:], ys[-1:], color="#" + GOLD, marker="o", ms=6, zorder=4)
-            for i in (0, len(ys) - 1):
+            first = next(i for i, y in enumerate(ys) if y is not None)
+            for i in (first, len(ys) - 1):
                 ax.annotate(f"{ys[i]:.1f}{unit}", (i, ys[i]), textcoords="offset points", xytext=(0, 7), ha="center",
                             fontsize=8, color="#" + INK, fontweight="bold")
-            lo, hi = min(ys + lta), max(ys + lta)
+            lo, hi = min(have + lta), max(have + lta)
             ax.set_ylim(lo - (hi - lo) * 0.35, hi + (hi - lo) * 0.3)
+            for i, y in enumerate(ys):
+                if y is None:
+                    ax.text(i, lo - (hi - lo) * 0.2, "no\ndata", ha="center", va="center", fontsize=6.5,
+                            color="#" + MUTED, style="italic")
         else:
-            ax.bar(xs, ys, color=["#" + BLUE] * (len(ys) - 1) + ["#" + GOLD], width=0.62, zorder=3)
+            top = max(have + lta)
+            ax.bar([x for x, y in zip(xs, ys) if y is not None], have, width=0.62, zorder=3,
+                   color=["#" + BLUE] * (len(have) - 1) + ["#" + GOLD])
+            avg = lta[-1] if lta else None
             for i, v in enumerate(ys):
-                ax.text(i, v + max(ys) * 0.015, f"{v:.2f}", ha="center", va="bottom", zorder=5,
-                        **{**label, "fontweight": "bold" if i == len(ys) - 1 else "normal"})
-            ax.set_ylim(0, max(ys + lta) * 1.18)
+                if v is None:
+                    ax.text(i, top * 0.04, "no\ndata", ha="center", va="bottom", fontsize=6.5, color="#" + MUTED,
+                            style="italic")
+                    continue
+                near = avg is not None and abs(v - avg) < top * 0.06  # a label on the dashed line: lift it clear
+                ax.text(i, (max(v, avg) + top * 0.035) if near else v + top * 0.015, f"{v:.2f}", ha="center",
+                        va="bottom", zorder=5, fontsize=7.5, color="#" + INK,
+                        fontweight="bold" if i == len(ys) - 1 else "normal")
+            ax.set_ylim(0, top * 1.18)
         if lta:
             ax.axhline(lta[-1], color="#" + (GOLD if kind == "line" else NAVY), lw=1.1, ls=(0, (4, 3)), zorder=2)
             if kind == "line":  # the column chart names its average in the caption, clear of the bars
@@ -329,7 +401,7 @@ def _chart_png(kind, data, unit="", w=6.6, h=3.0) -> bytes:
                         **{**label, "color": "#" + GOLD})
         ax.margins(x=0.07)
         ax.grid(axis="y", color="#" + RULE, lw=0.5)
-        ax.tick_params(axis="x", labelsize=7, length=0)
+        ax.tick_params(axis="x", labelsize=6.8, length=0)
         ax.tick_params(axis="y", labelsize=7)
     else:  # horizontal bars by market
         data = sorted(data, key=lambda d: d["value"])[-12:]
@@ -518,8 +590,7 @@ def build_docx(md: str, fmt: str, deck: dict, out: Path, team: str = "London off
             p = para(cell, after=0, line=1.0)
             _font(p.add_run(val), HEAD, 17, NAVY)
             for m in REF.findall(r[2]):
-                rr = _font(p.add_run(f"[{m}]"), BODY, 7, NAVY, True)
-                rr.font.superscript = True
+                _raise(_font(p.add_run(f"[{m}]"), BODY, 8.5, NAVY, True), 8)
             chg = r[4] if len(r) > 4 else ""
             up = chg.startswith("+") and not chg.startswith("+0.00")
             down = chg.startswith("-")
@@ -586,6 +657,8 @@ def build_docx(md: str, fmt: str, deck: dict, out: Path, team: str = "London off
         note = {"line": "Quarter end; gold dashed line: long-term average",
                 "column": "Latest quarter in gold" + (f"; dashed line: long-term average {lta[-1]:.2f}" if lta else ""),
                 "barh": "Latest quarter; gold: moved since the previous quarter"}[k]
+        if k in ("line", "column") and (gone := missing_quarters(data)):
+            note += f". No figure in the library for {' and '.join(gone)}"
         p = para(cell_or_doc, after=4, line=1.0)
         _keep_next(p)
         _font(p.add_run(note), BODY, 7.5, MUTED, italic=True)
@@ -597,13 +670,13 @@ def build_docx(md: str, fmt: str, deck: dict, out: Path, team: str = "London off
         p = para(cell_or_doc, after=0, before=2, line=1.0)
         _para_border(p, "top", RULE, 4, 2)
         _font(p.add_run("Source: "), BODY, 7.5, MUTED)
-        rich(p, deck_cite(ref) or "the team library", 7.5, MUTED)
+        rich(p, deck_cite(ref) or "the team library", 7.5, NAVY, sup=False)
         if k == "line":
             refs = sorted({deck_cite(d.get("ref")) for d in data if d.get("ref")} - {"", deck_cite(ref)},
                           key=lambda s: int(s[1:-1]))
             if refs:
                 _font(p.add_run("; earlier quarters "), BODY, 7.5, MUTED)
-                rich(p, "".join(refs), 7.5, MUTED)
+                rich(p, "".join(refs), 7.5, NAVY, sup=False)
 
     pair = [c for c in charts if c[0] in ("line", "column")]
     num = 0
@@ -692,7 +765,7 @@ def build_docx(md: str, fmt: str, deck: dict, out: Path, team: str = "London off
         p.paragraph_format.first_line_indent = Mm(-8)
         _font(p.add_run(f"[{num}]\t"), BODY, 8.5, NAVY, True)
         p.paragraph_format.tab_stops.add_tab_stop(Mm(8))
-        _font(p.add_run(title_.strip()), BODY, 8.5, INK)
+        _font(p.add_run(nice_dates(title_.strip())), BODY, 8.5, INK)
         if url:
             _font(p.add_run("  http" + url.strip()), BODY, 7.5, BLUE)
 
