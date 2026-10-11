@@ -129,7 +129,7 @@ def test_brief_downloads_as_a_branded_research_note(app, tmp_path):
     from skills.market_brief import report
     md = app.call("generate_brief", {"format": "board"}, "Kenneth")["summary"]
     b = report.parse(md)
-    assert b.title and b.sources and b.section("Key numbers") and b.section("Headline")
+    assert b.title and b.sources and b.numbers and b.headline
     out = report.build(app.ctx, md, "board", tmp_path)
     doc = Document(out["docx"])
     text = "\n".join(p.text for p in doc.paragraphs)
@@ -166,6 +166,77 @@ def test_research_note_details_read_cleanly():
     assert line.count("3rd floor") == 1 and "9,800 sq ft" in line and "(18 Sep 2026)" in line
     assert nice_date("2026-06-18") == "18 Jun 2026" and report.nice_dates("as of 2026-10-08") == "as of 8 Oct 2026"
     assert plain_words("two unpre-let speculative schemes") == "two speculative schemes with no pre-lets"
+
+
+def _note_text(path):
+    from docx import Document
+    doc = Document(path)
+    cells = "\n".join(c.text for t in doc.tables for r in t.rows for c in r.cells)
+    return "\n".join(p.text for p in doc.paragraphs) + "\n" + cells, doc
+
+
+def _q(year, q, v, ref="[1]", lta=None):
+    return {"period": f"Q{q} {year}", "value": v, "ref": ref, **({"lta": lta} if lta is not None else {})}
+
+
+def test_research_note_lays_out_whatever_the_brief_holds(tmp_path):
+    """The note is laid out from what the brief holds, not from fixed names or sizes: renamed sections, a table
+    with other columns, a Chinese brief, one quarter, many quarters, flat or empty series, no deals, a very long
+    headline, look-alike source titles. Every one makes a valid document with the parts that exist."""
+    from skills.market_brief import report
+    foot = ["[1] London Offices Spotlight Q2 2026 (Uploaded by PoC seed · 2026-10-11) - https://a/q2.pdf",
+            "[2] London Offices Spotlight Q2 2025 (Uploaded by PoC seed · 2026-10-11) - https://a/q2-25.pdf"]
+    deck = {"footnotes": foot,
+            "vacancy": [_q(2020 + i // 4, i % 4 + 1, 8 + (i % 3) * 0.1, "[2]" if i < 22 else "[1]", lta=7.4)
+                        for i in range(26)],  # many quarters, older ones from last year's report
+            "take_up": [_q(2026, 2, 3.1, lta=2.8)],  # one quarter
+            "rents": [{"market": "西區核心", "value": 185.0, "change": 0, "ref": "[1]"},
+                      {"market": "City Core", "value": 102.5, "change": 1.0, "ref": "[1]"}]}
+    cases = {
+        "renamed": "# Weekly note\n_11 Oct 2026 · top signals_\n\n## Summary of the week\nVacancy fell to 8.0% [1]. "
+                   "Take-up rose.\n\n## The figures\n| Area | Measure | Value | Quarter | Move | Note |\n|---|---|---|---|---|---|\n"
+                   "| London | Vacancy rate | 8.0% [1] | Q2 2026 | -0.50pp vs Q1 2026 | a \\| b | extra |\n| London | Take-up |\n\n"
+                   "## Notes and references\n[1] London Offices Spotlight Q2 2026 (Uploaded by PoC seed · 2026-10-11) - https://a/q2.pdf\n",
+        "chinese": "# 倫敦辦公室週報\n_2026年10月11日_\n\n## 摘要\n中區空置率降至8.0%。成交量高於長期平均！投資偏少？\n\n"
+                   "## 關鍵數據\n| 市場 | 指標 | 最新 | 期間 | 變動 |\n|---|---|---|---|---|\n| 倫敦 | 空置率 | 8.0% [1] | 2026年第二季 | -0.50pp |\n\n"
+                   "## 來源\n[1] London Offices Spotlight Q2 2026 - https://a/q2.pdf\n",
+        "bare": "Just a sentence with no headings at all, and no numbers.",
+        "long": "# Brief\n\n## Headline\n" + "Vacancy " + "keeps falling across every submarket and quarter " * 30 + "[1].\n",
+    }
+    for name, md in cases.items():
+        out = report.build_docx(md, "ic" if name == "chinese" else "board", deck, tmp_path / f"{name}.docx")
+        text, doc = _note_text(out)
+        assert "Important information" in text and "Prepared for Nan Fung Group" in doc.sections[-1].footer.paragraphs[0].text
+        for el in doc.element.iter(*report._ORDER):
+            ranks = [report._ORDER[el.tag].get(k.tag, 99) for k in el]
+            assert ranks == sorted(ranks), (name, el.tag)
+    text, _ = _note_text(tmp_path / "renamed.docx")
+    assert "Key takeaways" in text and "Vacancy fell to 8.0%" in text and "a | b" in text
+    assert "Notes and references" not in text and text.count("London Offices Spotlight Q2 2026 ") == 1
+    assert "London Offices Spotlight Q2 2025" in text  # a look-alike title is its own source, not [1]
+    text, _ = _note_text(tmp_path / "chinese.docx")
+    assert "中區空置率降至8.0%。" in text and "投資偏少？" in text and "空置率" in text
+    text, _ = _note_text(tmp_path / "long.docx")
+    assert "…" in text  # the cover cuts a very long headline; the takeaways keep it whole
+    assert report.sentences("空置率下降。成交增加！") == ["空置率下降。", "成交增加！"]
+    assert report.down_is_good("空置率") and report.down_is_good("Prime yield") and not report.down_is_good("Take-up")
+    flat = [_q(2025, 1, 0.0), _q(2025, 2, 0.0)]
+    for kind in ("line", "column"):
+        assert report._chart_png(kind, flat, "%")[:4] == b"\x89PNG"
+    assert report._chart_png("barh", [{"market": "A", "value": 0.0}], "£")[:4] == b"\x89PNG"
+
+
+def test_research_note_without_libreoffice_still_gives_word(app, tmp_path, monkeypatch):
+    from core import preview
+    from skills.market_brief import report
+    monkeypatch.setattr(preview, "available", lambda: {"soffice": False, "pdftoppm": False})
+    md = app.call("generate_brief", {"format": "ic"}, "Kenneth")["summary"]
+    out = report.build(app.ctx, md, "ic", tmp_path)
+    assert Path(out["docx"]).is_file() and out["pdf"] == "" and "LibreOffice" in out["why"]
+    monkeypatch.setattr(report, "build_docx", lambda *a, **k: 1 / 0)  # a layout failure falls back to plain
+    out = report.build(app.ctx, md, "ic", tmp_path / "plain")
+    text, _ = _note_text(out["docx"])
+    assert "IC Paper" in text and "Not investment advice" in text
 
 
 def test_without_pi_the_app_says_how_to_start_the_agent(app, monkeypatch, tmp_path):

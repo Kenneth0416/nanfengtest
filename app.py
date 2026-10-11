@@ -2421,8 +2421,16 @@ def report_files(fmt, fp, brief):
     key = f"{fp}-{hashlib.sha1(brief.encode()).hexdigest()[:10]}"
     hit = app.store.cached("brief_doc", key)
     d = (hit or {}).get("data") or {}
-    if hit and Path(d.get("docx") or "").exists():
-        return d
+    docx_ok = bool(d.get("docx")) and Path(d["docx"]).is_file()
+    pdf_ok = bool(d.get("pdf")) and Path(d["pdf"]).is_file()
+    retried = st.session_state.setdefault("pdf_retried", set())
+    if docx_ok and (pdf_ok or not _preview.available()["soffice"] or key in retried):
+        return d  # made, or as made as this server allows (no LibreOffice: Word only; a PDF that failed: once more)
+    if docx_ok:
+        retried.add(key)  # the Word file is there but its PDF failed: make both again, once per visit
+    failed = st.session_state.setdefault("doc_failed", {})  # a failure is shown, never kept: the next visit tries again
+    if key in failed:
+        return failed[key]
     jobs = st.session_state.setdefault("bg_jobs", {})
     job = jobs.get("doc-" + key)
     if job is None or not job.is_alive():
@@ -2436,7 +2444,10 @@ def report_files(fmt, fp, brief):
                 out = _report.build(ctx, brief, fmt, folder)
             except Exception as e:  # noqa: BLE001
                 out = {"docx": "", "pdf": "", "why": f"The report could not be made: {e}"}
-            own.save_cached("brief_doc", key, out, str(folder))
+            if out.get("docx"):
+                own.save_cached("brief_doc", key, out, str(folder))
+            else:
+                failed[key] = out
             own.db.close()
         job = jobs["doc-" + key] = threading.Thread(target=work, daemon=True, name=f"brief-doc-{fmt}")
         job.start()
@@ -2466,7 +2477,10 @@ def report_buttons(fmt, fp, brief, docx_col, pdf_col):
             mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document", key=f"dl_docx_{fmt}",
             icon=material("file-text"), help="The research note as an editable Word document, in the house style")
     else:
-        docx_col.button("Word", icon=material("file-text"), disabled=True, width="stretch", help=files.get("why") or "")
+        if docx_col.button("Try again", icon=material("refresh-cw"), width="stretch", key=f"dl_retry_{fmt}",
+                           help=(files.get("why") or "The research note could not be made") + ". Press to make it again."):
+            st.session_state.get("doc_failed", {}).clear()
+            st.rerun()
     if files.get("pdf") and Path(files["pdf"]).exists():
         pdf_col.download_button("PDF", Path(files["pdf"]).read_bytes(), file_name=f"{name}.pdf",
                                 mime="application/pdf", width="stretch", key=f"dl_pdf_{fmt}",

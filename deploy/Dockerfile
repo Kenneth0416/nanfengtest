@@ -4,9 +4,9 @@ FROM python:3.13-slim
 
 # Node 22 for Pi Durable; poppler for PDF page images (uploaded reports, lease photos, slide previews);
 # LibreOffice Impress renders the built deck to PDF for the slide preview and Writer the research note; Carlito and
-# Caladea stand in for Calibri and Cambria at the same widths; curl for the healthcheck
+# Caladea stand in for Calibri and Cambria at the same widths, Noto CJK sets Chinese text; curl for the healthcheck
 RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certificates gnupg poppler-utils \
-    libreoffice-impress libreoffice-writer fonts-dejavu-core fonts-crosextra-carlito fonts-crosextra-caladea \
+    libreoffice-impress libreoffice-writer fonts-dejavu-core fonts-crosextra-carlito fonts-crosextra-caladea fonts-noto-cjk \
  && curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
  && apt-get install -y --no-install-recommends nodejs \
  && rm -rf /var/lib/apt/lists/*

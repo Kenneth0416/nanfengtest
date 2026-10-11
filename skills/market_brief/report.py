@@ -30,11 +30,22 @@ _LOCK = threading.Lock()
 
 
 # ------------------------------------------------------------------------------------------- the brief, parsed
+# The brief's parts are found by what they hold, with their usual names (English or Chinese) as the first guess,
+# so a renamed heading, a reordered brief or a model-written one still lays out: the first table is the key
+# numbers, a list of [n] lines is the sources, the first prose is the headline.
+HEADLINE_NAMES = re.compile(r"headline|summary|overview|takeaway|摘要|重點|要點|概覽|總結|概要|标题|標題", re.I)
+NUMBERS_NAMES = re.compile(r"key (numbers|figures|data)|numbers|figures|market data|數據|数据|數字|关键|關鍵", re.I)
+SOURCES_NAMES = re.compile(r"^(sources?|references?|notes|footnotes|來源|来源|資料來源|参考|參考)", re.I)
+SRC_LINE = re.compile(r"^\s*\[(\d+)\]")
+
+
 @dataclass
 class Brief:
     title: str = ""
     sub: str = ""
-    sections: list[tuple[str, list[str]]] = field(default_factory=list)  # (heading, raw lines)
+    sections: list[tuple[str, list[str]]] = field(default_factory=list)  # the rest, as written: (heading, lines)
+    headline: list[str] = field(default_factory=list)
+    numbers: list[str] = field(default_factory=list)  # the section holding the key-numbers table
     sources: list[str] = field(default_factory=list)
     caveat: str = ""
 
@@ -42,29 +53,98 @@ class Brief:
         return next((lines for h, lines in self.sections if h.lower().startswith(name.lower())), [])
 
 
+def _is_table(line: str) -> bool:
+    return line.strip().startswith("|") and line.strip().count("|") >= 2
+
+
+def _prose(lines: list[str]) -> list[str]:
+    return [ln for ln in lines if ln.strip() and not _is_table(ln) and not ln.strip().startswith(("- ", "* ", "_"))]
+
+
 def parse(md: str) -> Brief:
-    b, cur = Brief(), None
-    for line in md.splitlines():
-        if line.startswith("# "):
-            b.title = line[2:].strip()
-        elif line.startswith("## "):
-            cur = (line[3:].strip(), [])
+    b, cur, pre = Brief(), None, []
+    for line in (md or "").splitlines():
+        if re.match(r"^#\s", line) and not b.title:
+            b.title = line.lstrip("#").strip()
+        elif re.match(r"^#{2,3}\s", line):
+            cur = (line.lstrip("#").strip(), [])
             b.sections.append(cur)
         elif cur is None:
-            if line.strip():
-                b.sub = line.strip().strip("_")
+            pre.append(line)
         else:
             cur[1].append(line)
-    src = b.section("Sources")
-    b.sources = [s for s in src if re.match(r"^\[\d+\]", s)]
-    b.caveat = " ".join(s.strip("_ ") for s in src if s.startswith("_"))
-    b.sections = [(h, lines) for h, lines in b.sections if h != "Sources"]
+    pre = [ln for ln in pre if ln.strip()]
+    if pre:
+        b.sub = next((ln.strip().strip("_") for ln in pre if ln.strip().startswith("_")), "")
+        rest = [ln for ln in pre if ln.strip().strip("_") != b.sub]
+        if rest:  # prose before the first heading: it is the opening, so it leads like a headline
+            b.sections.insert(0, ("Headline", rest))
+    secs = b.sections
+
+    def is_sources(h, lines):
+        refs = [ln for ln in lines if SRC_LINE.match(ln)]
+        body = [ln for ln in lines if ln.strip() and not ln.strip().startswith("_")]
+        return bool(refs) and (bool(SOURCES_NAMES.search(h)) or len(refs) >= max(1, 0.6 * len(body)))
+    src = next((i for i, (h, ln) in enumerate(secs) if is_sources(h, ln)), None)
+    if src is not None:
+        lines = secs[src][1]
+        b.sources = [SRC_LINE.sub(lambda m: f"[{m.group(1)}]", ln.strip()) for ln in lines if SRC_LINE.match(ln)]
+        b.caveat = " ".join(ln.strip().strip("_ ") for ln in lines if ln.strip().startswith("_"))
+    left = [i for i in range(len(secs)) if i != src]
+    num = next((i for i in left if NUMBERS_NAMES.search(secs[i][0]) and any(_is_table(x) for x in secs[i][1])),
+               next((i for i in left if any(_is_table(x) for x in secs[i][1])), None))
+    head = next((i for i in left if i != num and HEADLINE_NAMES.search(secs[i][0]) and _prose(secs[i][1])),
+                next((i for i in left if i != num and _prose(secs[i][1])), None))
+    b.headline = _prose(secs[head][1]) if head is not None else []
+    b.numbers = secs[num][1] if num is not None else []
+    b.sections = [secs[i] for i in left if i not in (head, num)]
     return b
 
 
 def table_rows(lines: list[str]) -> list[list[str]]:
-    rows = [[c.strip() for c in ln.strip().strip("|").split("|")] for ln in lines if ln.strip().startswith("|")]
-    return [r for r in rows if not all(set(c) <= set("-: ") for c in r)]
+    """A Markdown table as rows of cells, every row as wide as the header (short rows padded, long rows trimmed);
+    an escaped pipe (backslash, bar) stays inside its cell."""
+    rows = []
+    for ln in lines:
+        if not _is_table(ln):
+            continue
+        cells = [c.strip().replace("\\|", "|") for c in re.split(r"(?<!\\)\|", ln.strip().strip("|"))]
+        if all(set(c) <= set("-: ") for c in cells):
+            continue
+        rows.append(cells)
+    if not rows:
+        return []
+    width = len(rows[0])
+    return [(r + [""] * width)[:width] for r in rows]
+
+
+def columns(head: list[str]) -> dict:
+    """Which column is which, by the header's words, falling back to the brief's usual order."""
+    want = {"market": r"market|submarket|area|市場|市场|地區|区域|子市場",
+            "metric": r"metric|measure|indicator|指標|指标|項目",
+            "latest": r"latest|value|current|figure|最新|數值|数值|現值",
+            "period": r"period|quarter|date|as of|期|季|日期",
+            "change": r"change|move|vs|變動|变动|變化|变化|升跌"}
+    found = {}
+    for key, pat in want.items():
+        i = next((n for n, h in enumerate(head) if re.search(pat, h, re.I) and n not in found.values()), None)
+        if i is not None:
+            found[key] = i
+    for n, key in enumerate(("market", "metric", "latest", "period", "change")):
+        if key not in found and len(head) == 5 and n not in found.values():
+            found[key] = n
+    return found
+
+
+def down_is_good(label: str) -> bool:
+    """For an owner of London offices: vacancy, rent-free and yields are better when they fall."""
+    return bool(re.search(r"vacan|空置|rent[- ]?free|免租|yield|收益率|回報率", label or "", re.I))
+
+
+def sentences(text: str) -> list[str]:
+    """Sentences in English or Chinese: after . ! ? before a capital, a digit or £; after 。！？ always."""
+    parts = re.split(r"(?<=[.!?])\s+(?=[A-Z£\d\"'(])|(?<=[。！？])\s*", (text or "").strip())
+    return [p.strip() for p in parts if p and p.strip()]
 
 
 # ----------------------------------------------------------------------------------------------- docx helpers
@@ -344,7 +424,9 @@ def _chart_png(kind, data, unit="", w=6.6, h=3.0) -> bytes:
     from matplotlib import font_manager, rcParams
     logging.getLogger("matplotlib.font_manager").setLevel(logging.ERROR)
     have = {f.name for f in font_manager.fontManager.ttflist}
-    rcParams.update({"font.family": [f for f in ("Calibri", "Carlito", "DejaVu Sans") if f in have] or ["sans-serif"],
+    fams = ("Calibri", "Carlito", "Noto Sans CJK TC", "Noto Sans CJK SC", "Noto Sans CJK JP", "Microsoft JhengHei",
+            "PingFang TC", "WenQuanYi Zen Hei", "DejaVu Sans")  # Chinese market names fall back to a CJK face
+    rcParams.update({"font.family": [f for f in fams if f in have] or ["sans-serif"],
                      "font.size": 8.5, "axes.edgecolor": "#" + RULE, "axes.labelcolor": "#" + MUTED,
                      "xtick.color": "#" + MUTED, "ytick.color": "#" + MUTED, "axes.spines.top": False,
                      "axes.spines.right": False, "axes.spines.left": False, "ytick.left": False})
@@ -357,7 +439,8 @@ def _chart_png(kind, data, unit="", w=6.6, h=3.0) -> bytes:
         ys = [d["value"] for d in data]
         have = [y for y in ys if y is not None]
         lta = [d.get("lta") for d in data if d.get("lta") is not None]
-        ax.set_xticks(xs, [_short(d["period"]) for d in data])
+        step = max(1, -(-len(data) // 10))  # at most about ten labels; the latest quarter always named
+        ax.set_xticks(xs, [_short(d["period"]) if (len(data) - 1 - i) % step == 0 else "" for i, d in enumerate(data)])
         if kind == "line":
             seg = []  # a missing quarter breaks the line rather than being bridged
             for x, y in zip(xs + [None], ys + [None]):
@@ -374,6 +457,8 @@ def _chart_png(kind, data, unit="", w=6.6, h=3.0) -> bytes:
                 ax.annotate(f"{ys[i]:.1f}{unit}", (i, ys[i]), textcoords="offset points", xytext=(0, 7), ha="center",
                             fontsize=8, color="#" + INK, fontweight="bold")
             lo, hi = min(have + lta), max(have + lta)
+            if hi - lo < 1e-9:  # one quarter, or every quarter the same: give the axis some height
+                lo, hi = lo - (abs(lo) * 0.1 or 1), hi + (abs(hi) * 0.1 or 1)
             ax.set_ylim(lo - (hi - lo) * 0.35, hi + (hi - lo) * 0.3)
             for i, y in enumerate(ys):
                 if y is None:
@@ -381,6 +466,7 @@ def _chart_png(kind, data, unit="", w=6.6, h=3.0) -> bytes:
                             color="#" + MUTED, style="italic")
         else:
             top = max(have + lta)
+            top = top if top > 0 else 1.0  # all zero: still a visible axis
             ax.bar([x for x, y in zip(xs, ys) if y is not None], have, width=0.62, zorder=3,
                    color=["#" + BLUE] * (len(have) - 1) + ["#" + GOLD])
             avg = lta[-1] if lta else None
@@ -404,7 +490,7 @@ def _chart_png(kind, data, unit="", w=6.6, h=3.0) -> bytes:
         ax.tick_params(axis="x", labelsize=6.8, length=0)
         ax.tick_params(axis="y", labelsize=7)
     else:  # horizontal bars by market
-        data = sorted(data, key=lambda d: d["value"])[-12:]
+        data = sorted([d for d in data if isinstance(d.get("value"), (int, float))], key=lambda d: d["value"])[-12:]
         names = [d["market"] for d in data]
         ys = [d["value"] for d in data]
         moved = [bool(d.get("change")) for d in data]
@@ -412,7 +498,7 @@ def _chart_png(kind, data, unit="", w=6.6, h=3.0) -> bytes:
         for i, v in enumerate(ys):
             ax.text(v, i, f" {unit}{v:,.2f}" if unit == "£" else f" {v:g}", va="center", fontsize=7.5, color="#" + INK)
         ax.grid(axis="x", color="#" + RULE, lw=0.5)
-        ax.set_xlim(0, max(ys) * 1.15)
+        ax.set_xlim(0, (max(ys) * 1.15) or 1)
         ax.tick_params(axis="y", labelsize=7.5, length=0)
         ax.tick_params(axis="x", labelsize=7)
         ax.spines["left"].set_visible(True)
@@ -423,19 +509,177 @@ def _chart_png(kind, data, unit="", w=6.6, h=3.0) -> bytes:
     return buf.getvalue()
 
 
+# ------------------------------------------------------------------------------------------- document blocks
+def takeaways(doc, hl: str, said: list[str]):
+    """The headline, one sentence per line, in a shaded panel with a gold rule; its references follow the last."""
+    box = doc.add_table(rows=1, cols=1)
+    _fixed(box, [170])
+    _no_split(box)
+    _borders(box, inside_h=False)
+    cell = box.rows[0].cells[0]
+    _shade(cell, PANEL)
+    _cell_border(cell, "left", GOLD, 24)
+    _margins(cell, top=Mm(4).twips, bottom=Mm(3).twips, left=Mm(6).twips, right=Mm(6).twips)
+    refs = "".join(f"[{r}]" for r in dict.fromkeys(REF.findall(hl)))
+    cell.paragraphs[0].paragraph_format.space_after = Pt(0)
+    for i, line in enumerate(said):
+        line = REF.sub("", line).strip()
+        p = cell.paragraphs[0] if i == 0 else para(cell)
+        p.paragraph_format.space_after = Pt(5)
+        p.paragraph_format.left_indent = Mm(5)
+        p.paragraph_format.first_line_indent = Mm(-5)
+        _font(p.add_run("■  "), BODY, 7, GOLD)
+        rich(p, line + (" " + refs if refs and i == len(said) - 1 else ""), 10.5, INK, font=BODY)
+
+
+def _move_colour(change: str, label: str) -> str:
+    if not change.startswith(("+", "-")) or re.match(r"[+-]0(\.0+)?(?!\d)", change):
+        return INK
+    up = change.startswith("+")
+    good = (not up) if down_is_good(label) else up
+    return GOOD if good else BAD
+
+
+def tiles_and_table(doc, rows, head, body, col, n):
+    """KPI tiles (the first four London rows, or the first four rows) and the key-numbers table, whatever its
+    columns are."""
+    if not rows:
+        return
+    get = lambda r, k: r[col[k]] if k in col and col[k] < len(r) else ""  # noqa: E731
+    if "latest" in col:
+        london = [r for r in body if get(r, "market").strip().lower() in ("london", "central london", "倫敦", "伦敦")]
+        tiles = (london or body)[:4]
+        if tiles:
+            para(doc, after=2)
+            kt = doc.add_table(rows=1, cols=len(tiles))
+            _fixed(kt, [170 / len(tiles) - 0.01] * len(tiles))
+            _no_split(kt)
+            _borders(kt, inside_h=False)
+            for cell, r in zip(kt.rows[0].cells, tiles):
+                _cell_border(cell, "top", GOLD, 18)
+                _margins(cell, top=Mm(3).twips, left=Mm(2).twips, right=Mm(3).twips)
+                label = get(r, "metric") or get(r, "market")
+                _font(cell.paragraphs[0].add_run(label.upper()), BODY, 7, MUTED, True, spacing=0.6)
+                p = para(cell, after=0, line=1.0)
+                _font(p.add_run(nice_dates(REF.sub("", get(r, "latest")).strip())), HEAD, 17, NAVY)
+                for m in REF.findall(get(r, "latest")):
+                    _raise(_font(p.add_run(f"[{m}]"), BODY, 8.5, NAVY, True), 8)
+                chg = get(r, "change")
+                colour = _move_colour(chg, label)
+                mark = "▲ " if chg.startswith("+") and colour != INK else "▼ " if chg.startswith("-") and colour != INK else "● "
+                _font(para(cell, after=0).add_run(mark + (chg or get(r, "period"))), BODY, 8,
+                      MUTED if colour == INK else colour)
+    n_cols = len(head)
+    widths = [32, 46, 32, 20, 40] if n_cols == 5 else [170 / n_cols - 0.01] * n_cols
+    heading(doc, "Key numbers", 16, n, "Market data")
+    t = doc.add_table(rows=len(rows), cols=n_cols)
+    _fixed(t, widths)
+    _no_split(t)
+    t.rows[0]._tr.get_or_add_trPr().append(OxmlElement("w:tblHeader"))  # repeats on a new page
+    _borders(t, RULE, True, True, 4)
+    for ri, r in enumerate(rows):
+        label = get(r, "metric") or get(r, "market")
+        for ci, txt in enumerate(r):
+            cell = t.rows[ri].cells[ci]
+            _margins(cell, top=Mm(1.4).twips, bottom=Mm(1.4).twips, left=Mm(2).twips, right=Mm(2).twips)
+            p = cell.paragraphs[0]
+            p.paragraph_format.space_after = Pt(0)
+            if ci == col.get("latest"):
+                p.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+            if ri == 0:
+                _shade(cell, NAVY)
+                _font(p.add_run(txt.upper()), BODY, 7.5, "FFFFFF", True, spacing=0.5)
+                continue
+            if ri % 2 == 0:
+                _shade(cell, "F7F6F2")
+            colour = _move_colour(txt, label) if ci == col.get("change") else INK
+            rich(p, txt, 9, colour, bold=(ci == col.get("latest")))
+    p = para(doc, before=3, after=0)
+    _font(p.add_run("Change is against the previous quarter; pp = percentage points. Green and red show whether "
+                    "the move is good or bad for an owner of London offices."), BODY, 7.5, MUTED, italic=True)
+
+
+def draw_charts(doc, charts, deck_cite):
+    """Vacancy and take-up side by side, then rents full width. A chart that cannot be drawn is left out with a
+    line saying so; it never stops the note."""
+    def figure(cell_or_doc, i, k, data, caption, unit, ref, width_mm):
+        try:
+            png = _chart_png(k, data, unit, w=width_mm / 25.4,
+                             h=(2.7 if width_mm < 120 else 3.3 if k == "barh" else 2.5))
+        except Exception as e:  # noqa: BLE001
+            para(cell_or_doc, f"Figure {i}: {caption} could not be drawn ({type(e).__name__}).", 8, MUTED, italic=True)
+            return
+        p = para(cell_or_doc, after=3, line=1.0)
+        _keep_next(p)
+        _font(p.add_run(f"Figure {i}   "), BODY, 8.5, GOLD, True)
+        _font(p.add_run(caption), BODY, 8.5, NAVY, True)
+        lta = [d.get("lta") for d in data if d.get("lta") is not None]
+        note = {"line": "Quarter end; gold dashed line: long-term average",
+                "column": "Latest quarter in gold" + (f"; dashed line: long-term average {lta[-1]:.2f}" if lta else ""),
+                "barh": "Latest quarter; gold: moved since the previous quarter"}[k]
+        if k in ("line", "column") and (gone := missing_quarters(data)):
+            note += (f". No figure in the library for {' and '.join(gone)}" if len(gone) <= 3
+                     else f". No figure in the library for {len(gone)} of these quarters")
+        p = para(cell_or_doc, after=4, line=1.0)
+        _keep_next(p)
+        _font(p.add_run(note), BODY, 7.5, MUTED, italic=True)
+        p = para(cell_or_doc, after=0, line=1.0)
+        _keep_next(p)
+        p.add_run().add_picture(io.BytesIO(png), width=Mm(width_mm - (3 if width_mm < 120 else 0)))
+        p = para(cell_or_doc, after=0, before=2, line=1.0)
+        _para_border(p, "top", RULE, 4, 2)
+        _font(p.add_run("Source: "), BODY, 7.5, MUTED)
+        rich(p, deck_cite(ref) or "the team library", 7.5, NAVY, sup=False)
+        if k == "line":
+            refs = sorted({deck_cite(d.get("ref")) for d in data if d.get("ref")} - {"", deck_cite(ref)},
+                          key=lambda x: int(x[1:-1]))
+            if refs:
+                _font(p.add_run("; earlier quarters "), BODY, 7.5, MUTED)
+                rich(p, "".join(refs), 7.5, NAVY, sup=False)
+
+    pair = [c for c in charts if c[0] in ("line", "column")]
+    num = 0
+    rest = charts
+    if len(pair) == 2:  # the two time series side by side, as a research note sets them
+        t = doc.add_table(rows=1, cols=3)
+        _fixed(t, [82, 6, 82])
+        _no_split(t)
+        _borders(t, inside_h=False)
+        for cell, c in zip((t.rows[0].cells[0], t.rows[0].cells[2]), pair):
+            num += 1
+            figure(cell, num, *c, 82)
+            if len(cell.paragraphs) > 1:
+                cell._tc.remove(cell.paragraphs[0]._p)  # the empty first paragraph python-docx adds
+        rest = [c for c in charts if c not in pair]
+        para(doc, after=8)
+    for c in rest:
+        num += 1
+        figure(doc, num, *c, 170)
+        para(doc, after=6)
+
+
 # ------------------------------------------------------------------------------------------------- the document
 def build_docx(md: str, fmt: str, deck: dict, out: Path, team: str = "London office team") -> Path:
     """`md` is the brief as written; `deck` is skills.brief_deck.tools.deck_data (series for the charts)."""
     b = parse(md)
     sources = list(b.sources)
 
+    def key(text: str) -> tuple[str, str]:
+        """A source as (title, url): the [n], the '(Uploaded by …)' channel note and the link taken apart."""
+        body = re.sub(r"^\s*\[\d+\]\s*", "", text or "")
+        title, _, url = body.partition(" - http")
+        title = re.sub(r"\s*\((?:Uploaded|Collected|Shared)[^)]*\)\s*$", "", title).strip().lower()
+        return title, ("http" + url.strip()) if url else ""
+
     def cite(title_text: str) -> str:
-        """[n] for a source title, added to the Sources list when the text did not cite it."""
-        base = re.sub(r"\s*\(Uploaded by.*$", "", re.sub(r"^\[\d+\]\s*", "", title_text)).split(" - http")[0].strip()
-        for i, s in enumerate(sources, 1):
-            if base and base in s:
+        """[n] for a source, matched on its whole title (and link when both have one), never on part of a title;
+        added to the Sources list when the text did not cite it."""
+        t, u = key(title_text)
+        for i, src in enumerate(sources, 1):
+            st_, su = key(src)
+            if t and t == st_ and (not u or not su or u == su):
                 return f"[{i}]"
-        sources.append(f"[{len(sources) + 1}] {re.sub(r'^\[\d+\]\s*', '', title_text)}")
+        sources.append(f"[{len(sources) + 1}] {re.sub(r'^\s*\[\d+\]\s*', '', title_text)}")
         return f"[{len(sources)}]"
 
     def deck_cite(ref: str) -> str:
@@ -451,7 +695,28 @@ def build_docx(md: str, fmt: str, deck: dict, out: Path, team: str = "London off
     is_ic = fmt == "ic"
     kind = "IC paper section" if is_ic else "Board summary"
     date_text = (b.sub.split("·")[0].strip() if b.sub else "")
-    period = next((r[3] for r in table_rows(b.section("Key numbers"))[1:2]), "")
+    rows = table_rows(b.numbers)
+    head, body = (rows[0], rows[1:]) if rows else ([], [])
+    col = columns(head)
+    period = next((r[col["period"]] for r in body[:1] if "period" in col), "")
+    dated = [t for t in (date_text, f"Data to {period}" if period else "") if t]  # only the parts the brief gives
+
+    def series(name):  # a chart only when it has numbers to draw
+        return [d for d in (deck.get(name) or []) if isinstance(d.get("value"), (int, float))]
+    charts = []  # (kind, series, caption, unit, ref of the latest point)
+    if (v := series("vacancy")):
+        charts.append(("line", v, "Central London vacancy rate (%)", "%", v[-1].get("ref")))
+    if (v := series("take_up")):
+        charts.append(("column", v, "Central London take-up (m sq ft)", "", v[-1].get("ref")))
+    if (v := series("rents")):
+        charts.append(("barh", v, "Prime office rent by submarket (£ per sq ft)", "£", v[0].get("ref")))
+    for c in charts:  # number the charts' sources now, in reading order
+        deck_cite(c[4])
+        if c[0] == "line":
+            for d in c[1]:
+                deck_cite(d.get("ref"))
+    hl = " ".join(ln.strip() for ln in b.headline if ln.strip())
+    said = sentences(hl)
     report = "London Office Market · " + ("IC Paper" if is_ic else "Weekly Brief")
     doc.core_properties.title = report
     doc.core_properties.author = team
@@ -467,7 +732,7 @@ def build_docx(md: str, fmt: str, deck: dict, out: Path, team: str = "London off
     _fixed(band, [210])
     _borders(band, inside_h=False)
     row = band.rows[0]
-    row.height, row.height_rule = Mm(178), WD_ROW_HEIGHT_RULE.EXACTLY
+    row.height, row.height_rule = Mm(178), WD_ROW_HEIGHT_RULE.AT_LEAST  # grows rather than cuts a long line
     c = row.cells[0]
     _shade(c, NAVY)
     _margins(c, top=Mm(22).twips, left=Mm(22).twips, right=Mm(22).twips, bottom=Mm(14).twips)
@@ -485,12 +750,13 @@ def build_docx(md: str, fmt: str, deck: dict, out: Path, team: str = "London off
     _font(p.add_run("Investment committee section" if is_ic else "Weekly brief"), HEAD, 22, "C9D1DE", italic=True)
     p = para(c, after=4)
     _para_border(p, "top", GOLD, 12, 10)
-    hl = " ".join(ln for ln in b.section("Headline") if ln.strip())
-    first = re.split(r"(?<=\.)\s+", REF.sub("", hl).strip())[0] if hl else ""
+    first = REF.sub("", said[0]).strip() if said else ""
+    if len(first) > 230:  # the cover takes one sentence; a very long one is cut at a word, the page has it all
+        first = first[:230].rsplit(" ", 1)[0].rstrip(",;:") + "…"
     if first:
         rich(p, first, 12.5, "FFFFFF", font=HEAD, italic=True)
     p = para(c, after=0, before=10)
-    _font(p.add_run(f"{date_text}   ·   Data to {period}   ·   {team}"), BODY, 9.5, "C9D1DE")
+    _font(p.add_run("   ·   ".join(dated + [team])), BODY, 9.5, "C9D1DE")
 
     meta = doc.add_table(rows=1, cols=2)
     _fixed(meta, [126, 84])
@@ -505,8 +771,8 @@ def build_docx(md: str, fmt: str, deck: dict, out: Path, team: str = "London off
     para(left, b.sub.replace("·", " · ") if b.sub else "", 9, MUTED, italic=True, after=0)
     p = right.paragraphs[0]
     _font(p.add_run("CONTENTS"), BODY, 8, GOLD, True, spacing=1.2)
-    toc = ["Key takeaways", "Key numbers", "Charts"] + [h for h, _ in b.sections if h not in ("Headline", "Key numbers")] \
-        + ["Sources", "Important information"]
+    toc = (["Key takeaways"] if said else []) + (["Key numbers"] if rows else []) + (["Charts"] if charts else []) \
+        + [h for h, _ in b.sections] + (["Sources"] if sources else []) + ["Important information"]
     for i, t in enumerate(toc, 1):
         p = para(right, after=1)
         _font(p.add_run(f"{i:02d}  "), BODY, 9, GOLD, True)
@@ -532,7 +798,7 @@ def build_docx(md: str, fmt: str, deck: dict, out: Path, team: str = "London off
     p.alignment = WD_ALIGN_PARAGRAPH.RIGHT
     _font(p.add_run(report.upper()), BODY, 7.5, NAVY, True, spacing=0.8)
     p = para(hr_, after=0, align=WD_ALIGN_PARAGRAPH.RIGHT)
-    _font(p.add_run(f"{date_text} · Data to {period}"), BODY, 7.5, MUTED)
+    _font(p.add_run(" · ".join(dated)), BODY, 7.5, MUTED)
     p = hdr.paragraphs[0]
     p.paragraph_format.space_after = Pt(0)
     _para_border(p, "bottom", GOLD, 8, 1)
@@ -548,161 +814,26 @@ def build_docx(md: str, fmt: str, deck: dict, out: Path, team: str = "London off
     _font(p.add_run(" of "), BODY, 7.5, MUTED)
     _field(p, "NUMPAGES", 7.5, MUTED)
 
-    n = 1
+    n = 0
     # ---- key takeaways
-    heading(doc, "Key takeaways", 18, n, "Summary")
-    box = doc.add_table(rows=1, cols=1)
-    _fixed(box, [170])
-    _no_split(box)
-    _borders(box, inside_h=False)
-    cell = box.rows[0].cells[0]
-    _shade(cell, PANEL)
-    _cell_border(cell, "left", GOLD, 24)
-    _margins(cell, top=Mm(4).twips, bottom=Mm(3).twips, left=Mm(6).twips, right=Mm(6).twips)
-    sentences = [s for s in re.split(r"(?<=[.!?])\s+(?=[A-Z£\d])", hl.strip()) if s.strip()]
-    refs = "".join(REF.findall(hl) and [f"[{r}]" for r in dict.fromkeys(REF.findall(hl))])
-    cell.paragraphs[0].paragraph_format.space_after = Pt(0)
-    for i, s in enumerate(sentences):
-        s = REF.sub("", s).strip()
-        p = cell.paragraphs[0] if i == 0 else para(cell)
-        p.paragraph_format.space_after = Pt(5)
-        p.paragraph_format.left_indent = Mm(5)
-        p.paragraph_format.first_line_indent = Mm(-5)
-        _font(p.add_run("■  "), BODY, 7, GOLD)
-        rich(p, s + (" " + refs if i == len(sentences) - 1 else ""), 10.5, INK, font=BODY)
-
-    # KPI tiles from the first four London rows of the key-numbers table
-    rows = table_rows(b.section("Key numbers"))
-    head, body = (rows[0], rows[1:]) if rows else ([], [])
-    tiles = [r for r in body if r[0] == "London"][:4]
-    if tiles:
-        para(doc, after=2)
-        kt = doc.add_table(rows=1, cols=len(tiles))
-        _fixed(kt, [170 / len(tiles) - 0.01] * len(tiles))
-        _no_split(kt)
-        _borders(kt, inside_h=False)
-        for cell, r in zip(kt.rows[0].cells, tiles):
-            _cell_border(cell, "top", GOLD, 18)
-            _margins(cell, top=Mm(3).twips, left=Mm(2).twips, right=Mm(3).twips)
-            p = cell.paragraphs[0]
-            _font(p.add_run(r[1].upper()), BODY, 7, MUTED, True, spacing=0.6)
-            val = REF.sub("", r[2]).strip()
-            p = para(cell, after=0, line=1.0)
-            _font(p.add_run(val), HEAD, 17, NAVY)
-            for m in REF.findall(r[2]):
-                _raise(_font(p.add_run(f"[{m}]"), BODY, 8.5, NAVY, True), 8)
-            chg = r[4] if len(r) > 4 else ""
-            up = chg.startswith("+") and not chg.startswith("+0.00")
-            down = chg.startswith("-")
-            p = para(cell, after=0)
-            _font(p.add_run(("▲ " if up else "▼ " if down else "● ") + (chg or r[3])), BODY, 8,
-                  GOOD if up and "Vacancy" not in r[1] else BAD if (down and "Vacancy" not in r[1]) or (up and "Vacancy" in r[1])
-                  else GOOD if down else MUTED)
-    # ---- key numbers table
-    n += 1
-    heading(doc, "Key numbers", 16, n, "Market data")
-    if rows:
-        widths = [32, 46, 32, 20, 40]
-        t = doc.add_table(rows=len(rows), cols=len(head))
-        _fixed(t, widths[: len(head)])
-        _no_split(t)
-        h_ = OxmlElement("w:tblHeader")  # the header row repeats when the table runs onto another page
-        t.rows[0]._tr.get_or_add_trPr().append(h_)
-        _borders(t, RULE, True, True, 4)
-        for ri, r in enumerate(rows):
-            for ci, txt in enumerate(r):
-                cell = t.rows[ri].cells[ci]
-                _margins(cell, top=Mm(1.4).twips, bottom=Mm(1.4).twips, left=Mm(2).twips, right=Mm(2).twips)
-                p = cell.paragraphs[0]
-                p.paragraph_format.space_after = Pt(0)
-                if ci >= 2:
-                    p.alignment = WD_ALIGN_PARAGRAPH.RIGHT if ci == 2 else WD_ALIGN_PARAGRAPH.LEFT
-                if ri == 0:
-                    _shade(cell, NAVY)
-                    _font(p.add_run(txt.upper()), BODY, 7.5, "FFFFFF", True, spacing=0.5)
-                else:
-                    if ri % 2 == 0:
-                        _shade(cell, "F7F6F2")
-                    color = INK
-                    if ci == 4 and txt.startswith(("+", "-")) and not re.match(r"[+-]0\.00", txt):
-                        color = GOOD if txt.startswith("+") else BAD
-                        if "Vacancy" in r[1]:
-                            color = BAD if txt.startswith("+") else GOOD
-                    rich(p, txt, 9, color, bold=(ci == 2))
-        p = para(doc, before=3, after=0)
-        _font(p.add_run("Change is against the previous quarter; pp = percentage points. "
-                        "Green and red show whether the move is good or bad for an owner of London offices."), BODY, 7.5, MUTED, italic=True)
-    flagged = [ln for ln in b.section("Key numbers") if ln.startswith("_")]
+    if said:
+        n += 1
+        heading(doc, "Key takeaways", 18, n, "Summary")
+        takeaways(doc, hl, said)
+    tiles_and_table(doc, rows, head, body, col, n + 1 if rows else n)
+    n += 1 if rows else 0
+    flagged = [ln for ln in b.numbers if ln.strip().startswith("_")]
     for f in flagged:
-        para(doc, f, 8, BAD, italic=True, after=2)
+        para(doc, f.strip(), 8, BAD, italic=True, after=2)
 
     # ---- charts
-    n += 1
-    heading(doc, "Charts", 16, n, "Trends")
-    charts = []  # (kind, series, caption, unit, ref of the latest point)
-    if deck.get("vacancy"):
-        charts.append(("line", deck["vacancy"], "Central London vacancy rate (%)", "%", deck["vacancy"][-1].get("ref")))
-    if deck.get("take_up"):
-        charts.append(("column", deck["take_up"], "Central London take-up (m sq ft)", "", deck["take_up"][-1].get("ref")))
-    if deck.get("rents"):
-        charts.append(("barh", deck["rents"], "Prime office rent by submarket (£ per sq ft)", "£",
-                       deck["rents"][0].get("ref")))
-
-    def figure(cell_or_doc, i, k, data, caption, unit, ref, width_mm):
-        p = para(cell_or_doc, after=3, line=1.0)
-        _keep_next(p)
-        _font(p.add_run(f"Figure {i}   "), BODY, 8.5, GOLD, True)
-        _font(p.add_run(caption), BODY, 8.5, NAVY, True)
-        lta = [d.get("lta") for d in data if d.get("lta") is not None]
-        note = {"line": "Quarter end; gold dashed line: long-term average",
-                "column": "Latest quarter in gold" + (f"; dashed line: long-term average {lta[-1]:.2f}" if lta else ""),
-                "barh": "Latest quarter; gold: moved since the previous quarter"}[k]
-        if k in ("line", "column") and (gone := missing_quarters(data)):
-            note += f". No figure in the library for {' and '.join(gone)}"
-        p = para(cell_or_doc, after=4, line=1.0)
-        _keep_next(p)
-        _font(p.add_run(note), BODY, 7.5, MUTED, italic=True)
-        half = width_mm < 120
-        png = _chart_png(k, data, unit, w=width_mm / 25.4, h=(2.7 if half else 3.3 if k == "barh" else 2.5))
-        p = para(cell_or_doc, after=0, line=1.0)
-        _keep_next(p)
-        p.add_run().add_picture(io.BytesIO(png), width=Mm(width_mm - (3 if half else 0)))
-        p = para(cell_or_doc, after=0, before=2, line=1.0)
-        _para_border(p, "top", RULE, 4, 2)
-        _font(p.add_run("Source: "), BODY, 7.5, MUTED)
-        rich(p, deck_cite(ref) or "the team library", 7.5, NAVY, sup=False)
-        if k == "line":
-            refs = sorted({deck_cite(d.get("ref")) for d in data if d.get("ref")} - {"", deck_cite(ref)},
-                          key=lambda s: int(s[1:-1]))
-            if refs:
-                _font(p.add_run("; earlier quarters "), BODY, 7.5, MUTED)
-                rich(p, "".join(refs), 7.5, NAVY, sup=False)
-
-    pair = [c for c in charts if c[0] in ("line", "column")]
-    num = 0
-    if len(pair) == 2:  # the two time series side by side, as a research note sets them
-        t = doc.add_table(rows=1, cols=3)
-        _fixed(t, [82, 6, 82])
-        _no_split(t)
-        _borders(t, inside_h=False)
-        for cell, c in zip((t.rows[0].cells[0], t.rows[0].cells[2]), pair):
-            num += 1
-            cell.paragraphs[0].paragraph_format.space_after = Pt(0)
-            figure(cell, num, *c, 82)
-            cell._tc.remove(cell.paragraphs[0]._p)  # the empty first paragraph python-docx adds
-        rest = [c for c in charts if c not in pair]
-        para(doc, after=8)
-    else:
-        rest = charts
-    for c in rest:
-        num += 1
-        figure(doc, num, *c, 170)
-        para(doc, after=6)
+    if charts:
+        n += 1
+        heading(doc, "Charts", 16, n, "Trends")
+        draw_charts(doc, charts, deck_cite)
 
     # ---- the remaining sections, as written
     for h, lines in b.sections:
-        if h in ("Headline", "Key numbers"):
-            continue
         n += 1
         heading(doc, h, 16, n, {"What changed": "Signals", "Supports": "Signals", "Risks": "Signals", "Other": "Signals",
                                 "Our deals": "Internal", "Market deals": "Evidence", "Market talk": "Unconfirmed",
@@ -752,8 +883,9 @@ def build_docx(md: str, fmt: str, deck: dict, out: Path, team: str = "London off
                 para(doc, s, 10, INK, after=4)
 
     # ---- sources
-    n += 1
-    heading(doc, "Sources", 16, n, "References")
+    if sources:
+        n += 1
+        heading(doc, "Sources", 16, n, "References")
     for s in sources:
         m = re.match(r"^\[(\d+)\]\s*(.*)$", s)
         if not m:
@@ -808,6 +940,49 @@ def build_docx(md: str, fmt: str, deck: dict, out: Path, team: str = "London off
     return out
 
 
+def plain_docx(md: str, fmt: str, out: Path, team: str) -> Path:
+    """The safety net: the brief as a plain, still-branded document (header logo, headings, paragraphs, tables),
+    used only if the research-note layout meets content it cannot place, so a download never fails."""
+    doc = Document()
+    doc.styles["Normal"].font.name = BODY
+    doc.styles["Normal"].element.rPr.rFonts.set(qn("w:eastAsia"), CJK)
+    sec = doc.sections[0]
+    sec.page_width, sec.page_height = Mm(210), Mm(297)
+    sec.left_margin = sec.right_margin = Mm(20)
+    sec.header.paragraphs[0].add_run().add_picture(str(BRAND / "cobrand-nanfung@2x.png"), width=Mm(56))
+    lines = (md or "").splitlines()
+    i = 0
+    while i < len(lines):
+        ln = lines[i]
+        if _is_table(ln):
+            block = []
+            while i < len(lines) and _is_table(lines[i]):
+                block.append(lines[i])
+                i += 1
+            rows = table_rows(block)
+            if rows:
+                t = doc.add_table(rows=len(rows), cols=len(rows[0]))
+                t.style = "Table Grid"
+                for r, row in zip(t.rows, rows):
+                    for c, txt in zip(r.cells, row):
+                        rich(c.paragraphs[0], txt, 9)
+            continue
+        m = re.match(r"^(#{1,3})\s+(.*)", ln)
+        if m:
+            p = para(doc, after=6, before=10)
+            _font(p.add_run(m.group(2)), HEAD, {1: 20, 2: 15, 3: 12}[len(m.group(1))], NAVY)
+        elif ln.strip():
+            para(doc, re.sub(r"^\s*[-*]\s+", "■  ", ln.strip()), 10, INK, after=4)
+        i += 1
+    para(doc, "Not investment advice. For internal discussion within the team. Figures restated from public research "
+              "for evaluation of this proof of concept; verify against the original before external use.", 8, MUTED,
+         italic=True, before=12)
+    _tidy(doc.element)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    doc.save(out)
+    return out
+
+
 def build(ctx, md: str, fmt: str, out_dir: Path) -> dict:
     """The .docx and its PDF under out_dir. Returns {"docx", "pdf", "why"}; without LibreOffice there is no PDF
     and `why` says so."""
@@ -815,9 +990,14 @@ def build(ctx, md: str, fmt: str, out_dir: Path) -> dict:
     from skills.brief_deck import tools as bd
     deck = bd.deck_data(ctx, fmt)
     name = "london-office-ic-paper" if fmt == "ic" else "london-office-weekly-brief"
+    team = ctx.config.get("team", {}).get("name", "London office team")
+    out = Path(out_dir) / f"{name}.docx"
     with _LOCK:  # matplotlib's pyplot is not thread-safe, and two pages may ask at once
-        docx = build_docx(md, fmt, deck, Path(out_dir) / f"{name}.docx",
-                          ctx.config.get("team", {}).get("name", "London office team"))
+        try:
+            docx = build_docx(md, fmt, deck, out, team)
+        except Exception as e:  # noqa: BLE001  (content the layout did not expect: still give the reader a file)
+            print(f"[report] research-note layout failed, plain layout used: {e!r}", flush=True)
+            docx = plain_docx(md, fmt, out, team)
     pdf, why = preview.render_pdf(docx, out_dir)
     if pdf:
         final = Path(out_dir) / f"{name}.pdf"
