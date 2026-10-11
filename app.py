@@ -119,11 +119,16 @@ a.loa-chip { text-decoration:none; }
 .loa-brand { display:flex; align-items:center; gap:8px; font-size:17px; font-weight:700; color:var(--ink); margin:4px 0 2px 0; }
 .loa-brand .loa-ic { margin:0; color:var(--accent); }
 /* Copilot floating button: bottom right of every page, above the content; gone while the panel is open */
-.st-key-fab_copilot { position:fixed; right:28px; bottom:28px; z-index:1001; width:auto !important; }
-.st-key-fab_copilot button { width:54px; height:54px; min-height:54px; border-radius:50%; padding:0;
+.st-key-fab_copilot { position:fixed; right:max(20px, env(safe-area-inset-right)); bottom:max(20px, env(safe-area-inset-bottom));
+  z-index:1001; width:auto !important; }
+.st-key-fab_copilot button, .st-key-fab_close button { width:48px; height:48px; min-height:48px; border-radius:50%; padding:0;
   box-shadow:0 4px 16px rgba(15,26,42,.30); }
-.st-key-fab_copilot button [data-testid="stIconMaterial"] { font-size:26px; }
+.st-key-fab_copilot button [data-testid="stIconMaterial"], .st-key-fab_close button [data-testid="stIconMaterial"] { font-size:24px; }
 body:has(div[data-testid="stDialog"]) .st-key-fab_copilot { display:none; }
+/* while the panel is open the same spot holds a white close button, just left of the panel's edge (desktop) */
+.st-key-fab_close { position:fixed; bottom:max(20px, env(safe-area-inset-bottom)); right:772px; z-index:1001; width:auto !important; }  /* panel is 752px wide */
+.st-key-fab_close button { background:#fff; color:var(--accent); border:1px solid var(--line); }
+@media (max-width: 760px) { .st-key-fab_close { display:none; } }
 /* Copilot side panel: the input box stays at the bottom of the panel while the conversation scrolls above it */
 div[data-testid="stDialog"] section > div { display:flex; flex-direction:column; }
 div[data-testid="stDialog"] section > div > div[data-testid="stVerticalBlock"],
@@ -519,6 +524,8 @@ def open_copilot(context=None):
 @st.dialog("Copilot", position="right", width="medium", on_dismiss="rerun")
 def copilot():
     st.session_state["_in_dialog"] = True
+    if st.button("", icon=material("x"), key="fab_close", help="Close · Esc"):
+        st.rerun()  # a full rerun closes the panel; the page underneath keeps its place and the chat is saved
     copilot_body()
 
 
