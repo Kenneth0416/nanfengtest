@@ -1,0 +1,186 @@
+1
+00:00:03,200 --> 00:00:05,633
+London's office market moves every week.
+
+2
+00:00:06,233 --> 00:00:11,690
+The evidence is scattered across agency
+reports, public statistics, the news, and
+
+3
+00:00:11,690 --> 00:00:15,800
+colleagues' inboxes, and every hand-off loses
+a little of it.
+
+4
+00:00:16,400 --> 00:00:20,600
+The London Office Market Agent keeps it in one
+place, for the whole team.
+
+5
+00:00:22,600 --> 00:00:23,833
+It does three jobs.
+
+6
+00:00:24,433 --> 00:00:27,900
+Monitor watches the market, and summarises
+what changed.
+
+7
+00:00:28,500 --> 00:00:30,900
+Copilot answers questions at any moment.
+
+8
+00:00:31,500 --> 00:00:34,533
+Team brief turns the week into a paper and a
+slide deck.
+
+9
+00:00:36,533 --> 00:00:38,567
+Every figure carries its source.
+
+10
+00:00:39,167 --> 00:00:43,067
+Open data, such as Bank Rate and news, is
+collected automatically.
+
+11
+00:00:43,667 --> 00:00:49,456
+Agency reports, whose terms forbid scraping,
+are uploaded once by a colleague, and shared
+
+12
+00:00:49,456 --> 00:00:50,367
+with everyone.
+
+13
+00:00:50,967 --> 00:00:52,800
+Our own deals stay internal.
+
+14
+00:00:54,800 --> 00:01:00,269
+Behind the screen, a skill-based agent plans
+its steps, and calls Python tools to read,
+
+15
+00:01:00,269 --> 00:01:01,967
+check and analyse the data.
+
+16
+00:01:02,567 --> 00:01:06,200
+When two figures disagree, it flags them for a
+person to check.
+
+17
+00:01:06,800 --> 00:01:07,967
+Nothing is hidden.
+
+18
+00:01:09,867 --> 00:01:11,067
+Now, how to use it.
+
+19
+00:01:11,667 --> 00:01:13,800
+Open the link, and pick your name.
+
+20
+00:01:14,400 --> 00:01:16,933
+This proof of concept needs no password.
+
+21
+00:01:18,933 --> 00:01:22,533
+Monitor opens with the team summary, then
+today's signals.
+
+22
+00:01:23,133 --> 00:01:26,800
+Each card says what moved, by how much, and
+why it matters.
+
+23
+00:01:27,400 --> 00:01:32,667
+Describe your job in one sentence, and For You
+narrows the list to the submarkets you follow.
+
+24
+00:01:33,267 --> 00:01:36,433
+Found something for the board? Press Add to
+brief.
+
+25
+00:01:38,433 --> 00:01:42,533
+Got a question? Ask Copilot in plain English,
+or in Chinese.
+
+26
+00:01:43,133 --> 00:01:45,767
+Here, we ask it to compare two submarkets.
+
+27
+00:01:46,367 --> 00:01:51,374
+The agent works through its steps, then
+replies with a table, charts, and the source
+
+28
+00:01:51,374 --> 00:01:52,567
+behind every number.
+
+29
+00:01:53,167 --> 00:01:57,400
+Share to team passes the answer to your
+colleagues, exactly as written.
+
+30
+00:01:59,400 --> 00:02:01,033
+Heard something from a broker?
+
+31
+00:02:01,633 --> 00:02:07,364
+Share the link or the tip. It is filed,
+de-duplicated, and labelled as unverified, so
+
+32
+00:02:07,364 --> 00:02:10,533
+what one colleague hears, the whole team
+knows.
+
+33
+00:02:11,133 --> 00:02:13,633
+On Sources, upload an agency report.
+
+34
+00:02:14,233 --> 00:02:19,333
+The agent reads every page, and any doubtful
+figure waits for a person to check.
+
+35
+00:02:21,333 --> 00:02:23,533
+At the end of the week, open Team brief.
+
+36
+00:02:24,133 --> 00:02:28,919
+The paper is already written from the signals
+your team chose, with a footnote for every
+
+37
+00:02:28,919 --> 00:02:29,300
+figure.
+
+38
+00:02:29,900 --> 00:02:35,100
+Download it in Word or PDF, or open Slides,
+and change the deck simply by asking.
+
+39
+00:02:37,200 --> 00:02:43,038
+One team, one set of numbers, and nothing lost
+along the way, from Monday's news to Friday's
+
+40
+00:02:43,038 --> 00:02:43,800
+board paper.
+
+41
+00:02:44,400 --> 00:02:49,333
+Market figures shown are restated from Knight
+Frank reports, for evaluation only.

@@ -1,5 +1,9 @@
 # London Office Market Agent (PoC)
 
+[![Watch the 3-minute intro](docs/pitch/intro-video-thumbnail.jpg)](docs/pitch/intro-video.mp4)
+
+**3-minute intro video:** [watch or download (MP4, 1080p, 16 MB)](docs/pitch/intro-video.mp4) · [subtitles (SRT)](docs/pitch/intro-video.srt)
+
 An AI agent for a commercial real estate team that watches the London office market (rents, vacancy, take-up,
 supply, investment, macro and news), answers questions with every number sourced, and writes the weekly brief.
 
@@ -8,7 +12,7 @@ supply, investment, macro and news), answers questions with every number sourced
 | | |
 |---|---|
 | **Live demo** | https://kenneth-london-office.convert-md.com (no login, no key; pick a name on first visit) |
-| **Intro video** (3 min) | _link added when the video is published_ |
+| **Intro video** (3 min) | [MP4, 1080p](docs/pitch/intro-video.mp4) with [subtitles](docs/pitch/intro-video.srt): one minute on the design, two on how to use it |
 | **Business deck** | [PDF](docs/pitch/business-deck.pdf) · [PowerPoint](docs/pitch/business-deck.pptx) (6 slides) |
 | **User manual** | [PDF, 8 pages](docs/pitch/user-manual.pdf); the same guide is the in-app **Help** page |
 | **Code** | this repo; tests: `pytest -q tests` |

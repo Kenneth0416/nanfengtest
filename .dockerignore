@@ -9,3 +9,4 @@ data/exports
 data/internal
 pi_engine/node_modules
 .env
+docs/pitch
