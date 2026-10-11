@@ -8,7 +8,7 @@ import sys
 import threading
 
 from . import coverage
-from .pi_engine import Answer, PiDurableEngine
+from .pi_engine import AgentCancelled, Answer, PiDurableEngine
 
 
 # Which playbook each information-agent tool belongs to, to show the chain of skills used.
@@ -80,6 +80,8 @@ class StreamingAnswer:
         self.coverage = coverage.note(question, engine.app.store)
         self._q: queue.Queue = queue.Queue()
 
+        self.engine, self.role = engine, role
+
         def run():
             try:
                 self.answer = engine.ask(question, role, None, self._q.put, conversation)
@@ -88,6 +90,11 @@ class StreamingAnswer:
             finally:
                 self._q.put(None)
         threading.Thread(target=run, daemon=True, name=f"copilot-{role}").start()
+
+    def cancel(self) -> bool:
+        """Stop the run behind this answer (the person pressed Stop or moved on), so the next question does not
+        queue behind it."""
+        return self.engine.pi.cancel(self.role)
 
     def events(self):
         if self.coverage:
@@ -121,6 +128,8 @@ class Engine:
             return fn(*args)
         except AgentUnavailable:
             raise
+        except AgentCancelled:
+            raise AgentFailed("Stopped.", "cancelled") from None
         except Exception as e:
             print(f"[agent] Pi call failed: {str(e)[-600:]}", file=sys.stderr)
             raise AgentFailed(_plain(e), str(e)[-600:]) from None

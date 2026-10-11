@@ -953,6 +953,8 @@ def absorb_partial(chat_id, turns, slot: str = ""):
     written, marked 'Stopped', in the chat it belonged to. Returns the turns on screen, reloaded if that chat."""
     if (partial := st.session_state.get("partial")) and partial.get("slot", "") == slot:
         st.session_state.pop("partial")
+        if partial.get("stream") is not None and hasattr(partial["stream"], "cancel"):
+            partial["stream"].cancel()  # the Node run behind it stops too, so the next question starts at once
         app.store.add_chat_message(partial["chat"], "user", partial["q"])
         app.store.add_chat_message(partial["chat"], "assistant", (partial["text"].rstrip() or "(nothing written yet)")
                                    + "\n\n*Stopped.*")
@@ -1107,7 +1109,7 @@ def stream_answer(asked: str, chat_id: str | None = None, question: str = "", st
     stop = st.empty()
     stop.button("", icon=material("square"), key=f"stop_{chat_id}", type="tertiary",
                 help="Stop: keep what has been written so far")
-    st.session_state["partial"] = {"q": question or asked, "chat": chat_id, "text": "", "slot": slot}
+    st.session_state["partial"] = {"q": question or asked, "chat": chat_id, "text": "", "slot": slot, "stream": stream}
     shown = {"text": ""}
 
     held_box = {"text": "", "line_start": True}  # the tail is held back so the closing 'Follow up:' line never shows
@@ -1145,6 +1147,8 @@ def stream_answer(asked: str, chat_id: str | None = None, question: str = "", st
                 status.write("Your earlier conversation could not be loaded and was set aside; starting a new one.")
             elif e["event"] == "retry":
                 status.write("Taking longer than expected; resuming from the last checkpoint.")
+            elif e["event"] == "cancelled_previous":
+                status.write("Your earlier question was still running; it was stopped so this one can start.")
     def pieces_then_rest():
         yield from pieces()
         # whatever was held: all of it unless it is the follow-up line (the buttons below take over)
@@ -1790,6 +1794,10 @@ def open_deck_editor(fmt, theme, build=False, sel=1):
 def _close_editor():
     if st.session_state.get("deck_ed"):
         st.session_state["deck_ed"]["open"] = False
+    if (p := st.session_state.get("partial")) and p.get("slot") == "_deck":
+        # closed while the Copilot was building or editing: keep what it wrote and stop the run, so the next
+        # question in the main Copilot does not wait behind it
+        absorb_partial(p.get("chat"), [], "_deck")
 
 
 def _ed_rerun():

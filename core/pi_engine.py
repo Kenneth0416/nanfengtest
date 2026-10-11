@@ -77,6 +77,10 @@ def mimo_model(llm_cfg: dict, script: str) -> str:
     return shared
 
 
+class AgentCancelled(RuntimeError):
+    """The run was stopped on purpose (the person pressed Stop, asked something else, or reloaded the page)."""
+
+
 class PiDurableEngine:
     """One Pi Durable store per person (data/pi/<name>.sqlite + .json), so two people asking at once never
     write the same file; the same person's requests are queued behind a lock. A store that will not load
@@ -89,6 +93,7 @@ class PiDurableEngine:
         self.bridge: ToolBridge | None = None
         self._locks: dict[str, threading.Lock] = {}
         self._locks_guard = threading.Lock()
+        self._running: dict[str, dict] = {}  # role -> {"proc", "cancelled"}: the Node run in flight, if any
 
     def _lock(self, role: str) -> threading.Lock:
         with self._locks_guard:
@@ -131,7 +136,15 @@ class PiDurableEngine:
         runs again; the answer then comes from a fresh conversation (the person is told in the engine note).
         `on_event` receives each progress line ({"event": "delta"|"tool"|"tool_end"|"message_end", ...}) as it
         arrives, so the web app can stream the answer."""
-        with self._lock(role):
+        lock = self._lock(role)
+        if not lock.acquire(timeout=float(os.getenv("PI_WAIT", "12"))):
+            # The person's earlier question is still running (they stopped it, asked again, or reloaded the page)
+            # and would hold the lock until it finished, up to the full timeout: stop it, this question comes first.
+            self.cancel(role)
+            if on_event:
+                on_event({"event": "cancelled_previous"})
+            lock.acquire()
+        try:
             try:
                 return self._run_once(script, stdin, role, request_id, on_event, conversation)
             except RuntimeError as e:
@@ -145,6 +158,21 @@ class PiDurableEngine:
                 out, rid = self._run_once(script, stdin, role, None, on_event, conversation)
                 out["store_reset"] = True
                 return out, rid
+        finally:
+            lock.release()
+
+    def cancel(self, role: str) -> bool:
+        """Kill the Node run in flight for this person, if any. Its durable steps stay in the store; the next
+        question starts at once instead of waiting for it."""
+        run = self._running.get(role)
+        if not run or run["proc"].poll() is not None:
+            return False
+        run["cancelled"] = True
+        try:
+            run["proc"].kill()
+        except OSError:
+            pass
+        return True
 
     def _run_once(self, script: str, stdin: str, role: str, request_id: str | None, on_event=None,
                   conversation: str | None = None) -> tuple[dict, str]:
@@ -169,7 +197,9 @@ class PiDurableEngine:
         limit = int(os.getenv("PI_TIMEOUT", self.app.config.get("agent", {}).get("timeout_seconds", 1800)))
         for _attempt in range(2):   # a retry with the same request ID resumes, it never re-asks
             try:
-                proc, final, err = self._stream(cmd, stdin, env, limit, on_event)
+                proc, final, err = self._stream(cmd, stdin, env, limit, on_event, role)
+            except AgentCancelled:
+                raise
             except subprocess.TimeoutExpired:  # the durable run keeps its finished steps; one resume
                 last_err = f"timeout after {limit} s"
                 if on_event:
@@ -186,11 +216,14 @@ class PiDurableEngine:
             last_err = (err if len(err) <= 1000 else err[:500] + " … " + err[-500:]) or f"exit code {proc.returncode}, no output"
         raise RuntimeError(f"Pi local run of {script} failed (not the model API): {last_err}")
 
-    def _stream(self, cmd, stdin, env, limit, on_event):
+    def _stream(self, cmd, stdin, env, limit, on_event, role: str = ""):
         """Run the Node script, hand each progress line to on_event as it is printed, and return
-        (process, final JSON line or None, stderr text). Raises TimeoutExpired after `limit` seconds."""
+        (process, final JSON line or None, stderr text). Raises TimeoutExpired after `limit` seconds and
+        AgentCancelled when cancel(role) killed the run."""
         proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                                 text=True, env=env, cwd=self.dir)
+        run = {"proc": proc, "cancelled": False}
+        self._running[role] = run
         err_box = {"text": ""}
         reader = threading.Thread(target=lambda: err_box.__setitem__("text", proc.stderr.read()), daemon=True)
         reader.start()
@@ -220,7 +253,12 @@ class PiDurableEngine:
         except subprocess.TimeoutExpired:
             proc.kill()
             raise
+        finally:
+            if self._running.get(role) is run:
+                self._running.pop(role, None)
         reader.join(timeout=5)
+        if run["cancelled"]:
+            raise AgentCancelled("stopped")
         return proc, final, err_box["text"] or "\n".join(out_tail[-20:])
 
     def ask(self, question: str, role: str, request_id: str | None = None, on_event=None,
