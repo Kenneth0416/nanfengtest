@@ -561,7 +561,29 @@ def describe(old: dict, new: dict, instruction: str = "") -> str:
         if o.get("so_what") != s.get("so_what"):
             parts.append(f"第 {i} 頁結論改為「{s.get('so_what', '')}」" if zh else f"Slide {i}'s so-what is now \"{s.get('so_what', '')}\"")
         if o.get("fill") != s.get("fill") or o.get("layout") != s.get("layout"):
-            parts.append(f"第 {i} 頁的圖表或版面已更新" if zh else f"Slide {i}'s chart or layout changed")
+            oc = [v for v in (o.get("fill") or {}).values() if isinstance(v, dict) and "chart" in v]
+            nc = [v for v in (s.get("fill") or {}).values() if isinstance(v, dict) and "chart" in v]
+            names = {"rents": ("rents", "租金"), "vacancy": ("vacancy", "空置率"), "take_up": ("take-up", "去化"), "investment": ("investment", "投資")}
+            if o.get("layout") != s.get("layout"):
+                parts.append(f"第 {i} 頁版面改為 {s.get('layout')}" if zh else f"Slide {i} is now a {s.get('layout')} slide")
+            elif [c.get("chart") for c in oc] != [c.get("chart") for c in nc] and nc:
+                changed = [c for k, c in enumerate(nc) if k >= len(oc) or oc[k].get("chart") != c.get("chart")] or nc
+                what = "、".join(names.get(c.get("chart"), (c.get("chart"), c.get("chart")))[1] for c in changed) if zh else \
+                    ", ".join(names.get(c.get("chart"), (c.get("chart"), c.get("chart")))[0] for c in changed)
+                parts.append(f"第 {i} 頁的圖表換成{what}圖" if zh else f"Slide {i}'s chart is now the {what} chart")
+            elif nc and oc != nc:
+                bits = []
+                for c in nc:
+                    if c.get("last"):
+                        bits.append(f"最近 {c['last']} 期" if zh else f"the last {c['last']} periods")
+                    if c.get("markets"):
+                        bits.append(("只看 " if zh else "only ") + ("、" if zh else ", ").join(c["markets"]))
+                    if c.get("type"):
+                        bits.append({"line": "折線圖", "bar": "橫條圖", "column": "柱狀圖"}[c["type"]] if zh else f"as a {c['type']} chart")
+                parts.append((f"第 {i} 頁的圖表改為" + "、".join(bits)) if zh else (f"Slide {i}'s chart now shows " + ", ".join(bits))
+                             if bits else (f"第 {i} 頁的圖表已更新" if zh else f"Slide {i}'s chart changed"))
+            else:
+                parts.append(f"第 {i} 頁的內容已更新" if zh else f"Slide {i}'s content changed")
         elif o.get("notes") != s.get("notes"):
             parts.append(f"第 {i} 頁的文字已更新" if zh else f"Slide {i}'s text changed")
     if old.get("theme") != new.get("theme"):

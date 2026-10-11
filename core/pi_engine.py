@@ -131,7 +131,7 @@ class PiDurableEngine:
         return True, "ready"
 
     def _run(self, script: str, stdin: str, role: str, request_id: str | None, on_event=None,
-             conversation: str | None = None) -> tuple[dict, str]:
+             conversation: str | None = None, mode: str = "") -> tuple[dict, str]:
         """One request through Pi, serialised per person. A store error resets that person's store once and
         runs again; the answer then comes from a fresh conversation (the person is told in the engine note).
         `on_event` receives each progress line ({"event": "delta"|"tool"|"tool_end"|"message_end", ...}) as it
@@ -146,7 +146,7 @@ class PiDurableEngine:
             lock.acquire()
         try:
             try:
-                return self._run_once(script, stdin, role, request_id, on_event, conversation)
+                return self._run_once(script, stdin, role, request_id, on_event, conversation, mode)
             except RuntimeError as e:
                 if not STORE_ERROR.search(str(e)):
                     raise
@@ -155,7 +155,7 @@ class PiDurableEngine:
                       f"conversation", file=sys.stderr)
                 if on_event:
                     on_event({"event": "reset"})
-                out, rid = self._run_once(script, stdin, role, None, on_event, conversation)
+                out, rid = self._run_once(script, stdin, role, None, on_event, conversation, mode)
                 out["store_reset"] = True
                 return out, rid
         finally:
@@ -175,14 +175,18 @@ class PiDurableEngine:
         return True
 
     def _run_once(self, script: str, stdin: str, role: str, request_id: str | None, on_event=None,
-                  conversation: str | None = None) -> tuple[dict, str]:
+                  conversation: str | None = None, mode: str = "") -> tuple[dict, str]:
         if self.bridge is None:
             self.bridge = ToolBridge(self.app)
         rid = request_id or uuid.uuid4().hex
+        if mode:
+            self.bridge.modes[rid] = mode
+        else:
+            self.bridge.modes.pop(rid, None)
         llm_cfg = self.app.config.get("llm", {})
         store, conv = self.store_paths(role)
         store.parent.mkdir(parents=True, exist_ok=True)
-        env = {**os.environ, "BRIDGE_URL": self.bridge.url, "ROLE": role, "REQUEST_ID": rid,
+        env = {**os.environ, "BRIDGE_URL": self.bridge.url, "ROLE": role, "REQUEST_ID": rid, "PI_MODE": mode,
                "PI_STORE": str(store), "PI_CONVERSATIONS": str(conv),
                # which of this person's conversations the question continues (the web app's chat id); the
                # person's one default conversation when not given (the CLI)
@@ -262,10 +266,12 @@ class PiDurableEngine:
         return proc, final, err_box["text"] or "\n".join(out_tail[-20:])
 
     def ask(self, question: str, role: str, request_id: str | None = None, on_event=None,
-            conversation: str | None = None) -> Answer:
+            conversation: str | None = None, mode: str = "") -> Answer:
         """`conversation` names which of the person's saved chats the question continues (each web chat keeps
-        its own Pi conversation, so a new chat starts with a clean context)."""
-        out, rid = self._run("agent.ts", question, role, request_id, on_event, conversation)
+        its own Pi conversation, so a new chat starts with a clean context). `mode` "deck" limits the tools to
+        reading and building slides."""
+        out, rid = self._run("agent.ts", question, role, request_id, on_event, conversation, mode)
+        self.bridge.modes.pop(rid, None)
         return Answer(out.get("answer", ""), self.bridge.pop_trace(rid),
                       f"pi-durable:{out.get('model', '')} (conversation {out.get('conversation', '')})"
                       + (" · earlier conversation could not be loaded and was set aside; this is a new one"

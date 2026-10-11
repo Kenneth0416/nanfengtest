@@ -63,7 +63,7 @@ export function bridgeTool(t: BridgeTool) {
 }
 
 export async function manifest(): Promise<any> {
-	return (await fetch(`${BRIDGE}/manifest?role=${encodeURIComponent(ROLE)}`)).json();
+	return (await fetch(`${BRIDGE}/manifest?role=${encodeURIComponent(ROLE)}&mode=${encodeURIComponent(env.PI_MODE ?? "")}`)).json();
 }
 
 // PI_FAUX=1 runs a scripted model for tests (no API key). PI_FAUX_SCRIPT points at a JSON list of

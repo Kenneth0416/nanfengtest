@@ -1103,7 +1103,7 @@ def stream_answer(asked: str, chat_id: str | None = None, question: str = "", st
                 with st.expander("Technical details"):
                     st.code(e.detail, language=None)
         return None
-    status = st.status("Reading market data…", expanded=False)
+    status = st.status("Starting the Copilot…", expanded=False)
     stream = stream or engine.ask_streaming(asked, user, chat_id)
     tools = []
     stop = st.empty()
@@ -1573,7 +1573,7 @@ DECK_THEMES = {"navy-gold": "Navy & gold · team and board", "editorial-cream": 
 FORMAT_HELP = {"board": "Board summary: 3-6 slides for a reader with three minutes; headline, the moves that matter, what changed.",
                "ic": "IC paper section: adds the evidence table and groups the signals into supports / risks for the investment committee."}
 DECK_MSG = {"copilot": ("Slides chosen by the Copilot", "It read this week's data and picked the slides, layouts and titles."),
-            "rules": ("Slides picked by rules (Copilot offline)",
+            "rules": ("Slides picked by rules" + ("" if engine.ready else " (Copilot offline)"),
                       "The numbers and sources are the same; only the choice of slides and the titles are standard.")}
 
 
@@ -1886,15 +1886,21 @@ def refusal_text(err: dict, instruction: str) -> str:
     lines = []
     hints = {"vacancy_pct": ("vacancy", "空置"), "take_up_msqft": ("take-up", "take up", "去化"), "investment_gbp_bn": ("investment", "投資", "投资"),
              "active_requirements_msqft": ("requirement", "demand", "需求"), "prime_rent": ("rent", "租金")}
-    for r in err.get("refused_numbers") or []:
+    grouped: dict[tuple, dict] = {}
+    for r in err.get("refused_numbers") or []:  # the same figure in a slide's title and notes is one refusal
+        g = grouped.setdefault((r["slide"], tuple(r["numbers"])), {"slide": r["slide"], "numbers": r["numbers"], "where": [], "text": ""})
+        g["where"].append(r["where"])
+        g["text"] += " " + (r.get("text") or "")
+    wn = {"title": ("title", "標題"), "so_what": ("so-what", "結論"), "notes": ("notes", "備註")}
+    for r in grouped.values():
         nums = "、".join(r["numbers"]) if zh else ", ".join(r["numbers"])
-        low = (r.get("text") or "").lower()
+        low = r["text"].lower()
         about = {k: v for k, v in latest.items() if any(w in low for w in hints.get(k, ()))} or latest
         now = "；".join(f"目前{names.get(k, (k, k))[1]} {v}" for k, v in about.items()) if zh else \
             "; ".join(f"{names.get(k, (k, k))[0]} is {v}" for k, v in about.items())
-        where = {"title": ("title", "標題"), "so_what": ("so-what", "結論"), "notes": ("notes", "備註")}.get(r["where"], (r["where"], r["where"]))
-        lines.append(f"第 {r['slide']} 頁{where[1]}裡的 {nums} 不在本週數據裡（{now}），所以沒有套用。" if zh else
-                     f"{nums} in slide {r['slide']}'s {where[0]} is not in this week's data ({now}), so it was not applied.")
+        where = ("和".join(wn.get(w, (w, w))[1] for w in r["where"]) if zh else " and ".join(wn.get(w, (w, w))[0] for w in r["where"]))
+        lines.append(f"第 {r['slide']} 頁{where}裡的 {nums} 不在本週數據裡（{now}），所以沒有套用。" if zh else
+                     f"{nums} in slide {r['slide']}'s {where} is not in this week's data ({now}), so it was not applied.")
     if not lines:
         why = err.get("error") or ""
         lines.append(f"沒有建成：{why}" if zh else f"Not built: {why}")
@@ -1972,6 +1978,10 @@ def edit_deck(ed, hit, instruction, via_rules, chat_id, ui: EditorUI) -> Answer 
         st.session_state["deck_theme_want"] = (ed["fmt"], ed["theme"])
         open_chat(None, "_deck")
         return Answer(said, [], "rules")
+    # a plain command the rule editor understands is applied by rules even with the Copilot on: it is exact,
+    # instant, answers in the instruction's language, and never files anything in the library
+    if new or (said and "Copilot" not in said and said not in (_de.HELP, _de.HELP_ZH)):
+        via_rules = True
     if engine.ready and not via_rules:
         ans = stream_answer(engine.deck_edit_ask(fmt, theme, spec, instruction, sel), chat_id, instruction,
                             stream=engine.edit_deck_streaming(fmt, theme, spec, instruction, user, chat_id, sel), slot="_deck")

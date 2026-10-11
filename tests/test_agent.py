@@ -1634,3 +1634,86 @@ def test_the_copilot_edit_prompt_names_the_selected_slide_and_keeps_ids():
     spec = {"theme": "navy-gold", "slides": [{"layout": "Cover", "title": "T", "id": "s1"}, {"layout": "Statement", "title": "U", "id": "s2"}]}
     ask = Engine.deck_edit_ask("board", "navy-gold", spec, "this slide is wrong", sel=2)
     assert "looking at slide 2 (id s2)" in ask and "Keep every slide's `id`" in ask and "`last`" in ask
+
+
+def test_the_slide_editor_cannot_file_tips_deals_or_rules(app):
+    """A slide-editing instruction ("add a statement slide saying vacancy hit 47.3%") once reached the Copilot as
+    a question in its usual toolset and was filed as a shared tip. In deck mode the bridge lists and runs only
+    reading tools and the three deck tools."""
+    import json, urllib.request
+    from core.bridge import ToolBridge, allowed
+    bridge = ToolBridge(app)
+    tools = app.tools
+    assert not allowed(tools["share_tip"], "deck") and not allowed(tools["record_deal"], "deck") \
+        and allowed(tools["build_brief_pptx"], "deck") and allowed(tools["get_signals"], "deck") and allowed(tools["share_tip"], "")
+    names = {t["name"] for t in json.load(urllib.request.urlopen(f"{bridge.url}/manifest?role=Kenneth&mode=deck"))["tools"]}
+    assert "build_brief_pptx" in names and "share_tip" not in names and "record_deal" not in names
+    bridge.modes["r1"] = "deck"
+    req = urllib.request.Request(f"{bridge.url}/call", data=json.dumps({"tool": "share_tip", "args": {"text": "vacancy hit 47.3% in Soho"}, "role": "Kenneth"}).encode(),
+                                 headers={"Content-Type": "application/json", "x-request-id": "r1"})
+    try:
+        urllib.request.urlopen(req)
+        assert False, "share_tip ran in deck mode"
+    except urllib.error.HTTPError as e:
+        assert e.code == 403 and "not available while editing slides" in e.read().decode()
+    assert not any("47.3" in (r.get("text") or "") for r in app.store.inbox("new"))
+    bridge.server.shutdown()
+
+
+def test_describe_names_the_chart_change():
+    from core import deck_edit as de
+    old = {"theme": "navy-gold", "slides": [{"id": "a", "layout": "Cover", "title": "T"},
+                                            {"id": "b", "layout": "Chart + takeaway", "title": "V", "fill": {"chart": {"chart": "vacancy"}}}]}
+    new = {"theme": "navy-gold", "slides": [{"id": "a", "layout": "Cover", "title": "T"},
+                                            {"id": "b", "layout": "Chart + takeaway", "title": "V", "fill": {"chart": {"chart": "rents"}}}]}
+    assert "Slide 2's chart is now the rents chart" in de.describe(old, new, "replace the chart")
+    new2 = {"theme": "navy-gold", "slides": [{"id": "a", "layout": "Cover", "title": "T"},
+                                             {"id": "b", "layout": "Chart + takeaway", "title": "V", "fill": {"chart": {"chart": "vacancy", "last": 4}}}]}
+    assert "最近 4 期" in de.describe(old, new2, "只顯示最近四季")
+
+
+def test_a_stopped_copilot_run_is_killed_and_the_next_question_does_not_queue_behind_it(app, tmp_path, monkeypatch):
+    """Pressing Stop (or asking again, or reloading the page) used to leave the Node run going, and the next
+    question waited on the per-person lock with 'Reading market data…' until it finished. Now Stop kills the run,
+    and a question that finds the lock held for more than PI_WAIT seconds stops the earlier run itself."""
+    import threading, time
+    from core.pi_engine import AgentCancelled, PiDurableEngine
+    if not shutil.which("node"):
+        pytest.skip("node not installed")
+    (tmp_path / "slow.ts").write_text("setTimeout(() => { console.log(JSON.stringify({answer: 'late'})); }, 60000);\n")
+    eng = PiDurableEngine(app)
+    eng.dir = tmp_path
+    monkeypatch.setenv("PI_WAIT", "1")
+    got = {}
+
+    def first():
+        try:
+            eng._run("slow.ts", "{}", "Kenneth", None)
+        except AgentCancelled:
+            got["cancelled"] = True
+        except Exception as e:  # noqa: BLE001
+            got["error"] = e
+    t = threading.Thread(target=first, daemon=True)
+    t.start()
+    for _ in range(50):
+        if eng._running.get("Kenneth"):
+            break
+        time.sleep(0.1)
+    assert eng.cancel("Kenneth")
+    t.join(timeout=10)
+    assert got == {"cancelled": True} and not eng._lock("Kenneth").locked()
+    # a question arriving while an earlier run holds the lock stops that run after PI_WAIT seconds
+    t2 = threading.Thread(target=first, daemon=True)
+    got.clear()
+    t2.start()
+    for _ in range(50):
+        if eng._running.get("Kenneth"):
+            break
+        time.sleep(0.1)
+    events = []
+    t0 = time.monotonic()
+    with pytest.raises(RuntimeError):  # the second run is a missing script: it fails on its own, not by waiting
+        eng._run("missing.ts", "{}", "Kenneth", None, events.append)
+    assert time.monotonic() - t0 < 15 and {"event": "cancelled_previous"} in events
+    t2.join(timeout=10)
+    assert got == {"cancelled": True}

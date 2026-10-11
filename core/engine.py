@@ -74,7 +74,7 @@ class StreamingAnswer:
     """A Copilot answer being written: events() yields {"event": "delta", "text": ...} and tool events in order;
     when the generator finishes, `answer` holds the complete Answer (text, trace, sources) or `error` the failure."""
 
-    def __init__(self, engine: "Engine", question: str, role: str, conversation: str | None = None):
+    def __init__(self, engine: "Engine", question: str, role: str, conversation: str | None = None, mode: str = ""):
         self.answer: Answer | None = None
         self.error: Exception | None = None
         self.coverage = coverage.note(question, engine.app.store)
@@ -84,7 +84,7 @@ class StreamingAnswer:
 
         def run():
             try:
-                self.answer = engine.ask(question, role, None, self._q.put, conversation)
+                self.answer = engine.ask(question, role, None, self._q.put, conversation, mode)
             except Exception as e:  # noqa: BLE001  (surfaced to the page as .error)
                 self.error = e
             finally:
@@ -135,13 +135,13 @@ class Engine:
             raise AgentFailed(_plain(e), str(e)[-600:]) from None
 
     def ask(self, question: str, role: str, history: list[dict] | None = None, on_event=None,
-            conversation: str | None = None) -> Answer:
+            conversation: str | None = None, mode: str = "") -> Answer:
         """A Copilot question. Pi keeps the conversation itself, so history is not passed; `conversation` names
         which of the person's saved chats this continues (their one default chat when not given).
         `on_event` gets each streamed piece of the answer and each tool start as it happens."""
         gap = coverage.note(question, self.app.store)
         ans = self._run(self.pi.ask, f"{question}\n\n(Coverage note shown to the user: {gap})" if gap else question, role,
-                        None, on_event, conversation)
+                        None, on_event, conversation, mode)
         if gap:
             ans.text = f"> **Coverage:** {gap}\n\n{ans.text}"
         return ans
@@ -198,19 +198,19 @@ class Engine:
         """The Copilot plans the deck from this week's data: reads brief_deck_data (the ranked stories), decides
         which deserve a slide, which layouts and charts, writes titles, so-whats and a `why` per slide, builds,
         fixes anything the check reports. Returns (build result data, the Copilot's answer)."""
-        ans = self._run(self.pi.ask, self.deck_ask(fmt, theme), user)
+        ans = self._run(self.pi.ask, self.deck_ask(fmt, theme), user, None, None, None, "deck")
         return self.built_deck(ans), ans
 
     def build_deck_streaming(self, fmt: str, theme: str | None, user: str, conversation: str | None = None) -> "StreamingAnswer":
         """The same plan, watched: tool starts and the Copilot's words arrive as events; `built_deck(.answer)`
         gives the build once the events end."""
         self._check()
-        return StreamingAnswer(self, self.deck_ask(fmt, theme), user, conversation)
+        return StreamingAnswer(self, self.deck_ask(fmt, theme), user, conversation, "deck")
 
     def edit_deck_streaming(self, fmt: str, theme: str, spec: dict, instruction: str, user: str,
                             conversation: str | None = None, sel: int | None = None) -> "StreamingAnswer":
         self._check()
-        return StreamingAnswer(self, self.deck_edit_ask(fmt, theme, spec, instruction, sel), user, conversation)
+        return StreamingAnswer(self, self.deck_edit_ask(fmt, theme, spec, instruction, sel), user, conversation, "deck")
 
     def read_upload(self, path, user: str) -> tuple[dict | None, list[str], str]:
         """A colleague's PDF upload, read by the information agent for their review.

@@ -9,10 +9,20 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
 
+DECK_TOOLS = {"brief_deck_data", "brief_deck_guide", "build_brief_pptx"}
+
+
+def allowed(tool, mode: str) -> bool:
+    """In the slide editor ("deck" mode) the Copilot may read the library and build decks, nothing else: an
+    editing instruction is never filed as a tip, a deal or a rule."""
+    return mode != "deck" or tool.name in DECK_TOOLS or (tool.read_only and tool.name != "add_watch_rule")
+
+
 class ToolBridge:
     def __init__(self, app):
         self.app = app
         self.traces: dict[str, list] = defaultdict(list)
+        self.modes: dict[str, str] = {}  # request id -> "deck" for slide-editor requests
         self.lock = threading.Lock()
         bridge = self
 
@@ -36,9 +46,12 @@ class ToolBridge:
                 url = urlparse(self.path)
                 if url.path != "/manifest":
                     return self._send(404, {"error": "not found"})
-                role = parse_qs(url.query).get("role", ["team"])[0]
+                q = parse_qs(url.query)
+                role = q.get("role", ["team"])[0]
+                mode = q.get("mode", [""])[0]
                 tools = [{"name": t.name, "description": t.description, "parameters": t.parameters,
-                          "readOnly": t.read_only and t.name not in ("add_watch_rule",)} for t in bridge.app.tools.values()]
+                          "readOnly": t.read_only and t.name not in ("add_watch_rule",)}
+                         for t in bridge.app.tools.values() if allowed(t, mode)]
                 self._send(200, {"system": system_prompt(bridge.app, role), "tools": tools,
                                  "info": bridge.app.info_manifest()})
 
@@ -47,6 +60,10 @@ class ToolBridge:
                     return self._send(404, {"error": "not found"})
                 body = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))) or b"{}")
                 rid = self.headers.get("x-request-id", "")
+                tool = bridge.app.tools.get(body.get("tool", ""))
+                if tool is not None and not allowed(tool, bridge.modes.get(rid, "")):
+                    return self._send(403, {"error": f"{tool.name} is not available while editing slides: an editing "
+                                                     "instruction is not filed as a tip, a deal or a rule."})
                 try:
                     with bridge.lock:   # the SQLite store is shared with the UI
                         result = bridge.app.call(body["tool"], body.get("args") or {}, body.get("role"))
