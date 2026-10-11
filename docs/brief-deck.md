@@ -1,6 +1,6 @@
 # Brief deck: the team brief as a PowerPoint
 
-`skills/brief_deck` turns the team brief into a 3-6 slide editable PowerPoint. Python owns every
+`skills/brief_deck` turns the team brief into a 3-6 slide editable PowerPoint (up to 12 after edits). Python owns every
 figure, chart, table, KPI tile and footnote; the Copilot (or the default storyline) owns the words.
 
 ![Board deck, navy-gold](screenshots/brief-deck.png)
@@ -93,9 +93,33 @@ typed numbers, any number in the agent's text that the data does not hold is ref
 
 A spec is `{"theme": ..., "slides": [{"layout", "eyebrow", "title", "so_what", "why", "notes", "fill": {...}}]}`.
 `fill` names placeholders; charts, tables and hero figures are keys (`{"chart": "vacancy"}`), never
-typed figures. Any number in the agent's text that `deck_data` does not hold is refused ("numbers not
-in the data: 6.5"), as are an unknown theme or layout, fewer than 3 or more than 6 slides, a first
-slide that is not the Cover or a last slide that is not Sources.
+typed figures; a chart may carry `last` (2-20 periods), `markets` (a list of submarkets) or `type`
+(`line`, `bar`, `column`). Any number in the agent's text that `deck_data` does not hold is refused
+("numbers not in the data: 6.5"); a title or so-what may quote only the latest value of a series unless
+it names the period ("9.9% in Q1 2024"); the refusal comes back structured (`refused_numbers` with the
+slide, field and figures, and `latest` with the current values) so the editor can explain it in the
+person's language. Also refused: an unknown theme or layout, fewer than 3 or more than 12 slides, a first
+slide that is not the Cover or a last slide that is not Sources. Every built slide gets an `id` that the
+spec carries through edits. Chinese text is set in Microsoft JhengHei (East Asian font) so it is not
+substituted with an italic fallback.
+
+## The slide editor
+
+The floating editor on Team brief changes a built deck by conversation. With the Copilot, the current
+spec (and the slide the person is looking at) travels with the instruction, the Copilot revises it and
+builds again, and the reply is written from the difference between the old and new spec by slide id:
+added, removed, moved, retitled, a changed so-what or chart, a new theme. A revision that would drop a
+slide nobody asked to drop is held back with Apply / Keep buttons. Without the Copilot, or when it fails
+to answer, the rule editor (`core/deck_edit.py`) applies the same commands in English or Chinese, several
+in one message ("remove slide 3, then theme forest" / "刪第3頁，然後換森林主題"): remove, swap and move
+(by number, "this slide", "the last slide", "the rents slide", several pages at once), retitle, so-what,
+notes, add N slides or a topic or a statement at a position, shorten to N slides, chart range / markets
+/ type, theme by name, colour or audience ("for a client update" → forest-cream), undo / restore version
+N, export questions, source questions and a format switch ("make an IC version"). Requests that would
+need invented data (a Midtown-only slide, a pipeline slide, a logo, a 47.3% that is not in the data) are
+answered, not faked. Every state of the deck is kept as a version (up to 20, each with its own files)
+so Undo and the version list in the header need no rebuild; the theme control in the header rebuilds an
+edited deck on the new theme rather than planning it again.
 
 ## Three ways to build
 

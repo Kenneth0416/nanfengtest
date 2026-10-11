@@ -18,6 +18,7 @@ import copy
 import json
 import math
 import re
+import uuid
 from pathlib import Path
 
 from pptx import Presentation
@@ -91,6 +92,11 @@ def rgb(h):
 
 # ----------------------------------------------------------------------------- guardrail
 NUM = re.compile(r"\d+(?:[.,]\d+)*")
+CJK = re.compile(r"[\u3400-\u9fff]")
+CJK_FONT = "Microsoft JhengHei"  # Noto Sans CJK TC on Linux renders in its place
+PERIOD = re.compile(r"\b(?:Q[1-4]\s*20\d\d|20\d\d|H[12]\s*20\d\d)\b|20\d\d\s*年|第?[1-4一二三四]季", re.I)
+SERIES = ("vacancy", "take_up")  # the time series; a title quotes their latest value unless it names the period
+CHART_TYPES = {"line": XL_CHART_TYPE.LINE_MARKERS, "bar": XL_CHART_TYPE.BAR_CLUSTERED, "column": XL_CHART_TYPE.COLUMN_CLUSTERED}
 
 
 def allowed_numbers(data: dict) -> set[str]:
@@ -121,9 +127,29 @@ def allowed_numbers(data: dict) -> set[str]:
     return out
 
 
-def check_text(text: str, data: dict) -> list[str]:
-    ok = allowed_numbers(data)
+def latest_data(data: dict) -> dict:
+    """The data with each time series cut to its latest point: what a title or so-what may quote without
+    naming a period (9.9% was Q1 2024's vacancy; a headline that says 9.9% without saying so misleads)."""
+    return {k: (v[-1:] if k in SERIES and isinstance(v, list) and v else v) for k, v in data.items()}
+
+
+def check_text(text: str, data: dict, headline: bool = False) -> list[str]:
+    ok = allowed_numbers(latest_data(data) if headline and not PERIOD.search(text) else data)
     return [n for n in NUM.findall(text) if n not in ok and n.replace(",", "") not in ok]
+
+
+def refused_numbers(spec: dict, data: dict) -> list[dict]:
+    """Structured: [{slide, where, numbers, text}] for every number the data does not carry (titles and so-whats
+    may only quote the latest values unless they name the period)."""
+    out = []
+    for i, s in enumerate(spec.get("slides") or [], 1):
+        for k in ("title", "so_what", "notes", "eyebrow", "why"):
+            t = s.get(k)
+            if isinstance(t, str) and t != "auto":
+                bad = check_text(t, data, headline=k in ("title", "so_what"))
+                if bad:
+                    out.append({"slide": i, "where": k, "numbers": bad, "text": t})
+    return out
 
 
 def spec_text(spec: dict) -> list[tuple[str, str]]:
@@ -179,6 +205,13 @@ def validate(spec: dict, data: dict) -> list[str]:
                             "use a chart or a yields table instead")
             if isinstance(v, dict) and "chart" in v and v["chart"] not in CHARTS:
                 errs.append(f"slide {i}: unknown chart {v['chart']!r}; use one of {', '.join(CHARTS)}")
+            if isinstance(v, dict) and "chart" in v:
+                if "last" in v and not (isinstance(v["last"], int) and 2 <= v["last"] <= 20):
+                    errs.append(f"slide {i}: chart 'last' is a number of periods from 2 to 20")
+                if "markets" in v and not (isinstance(v["markets"], list) and v["markets"] and all(isinstance(m, str) for m in v["markets"])):
+                    errs.append(f"slide {i}: chart 'markets' is a list of submarket names")
+                if "type" in v and v["type"] not in CHART_TYPES:
+                    errs.append(f"slide {i}: chart 'type' is one of {', '.join(CHART_TYPES)}")
             if isinstance(v, dict) and "table" in v and v["table"] not in TABLES:
                 errs.append(f"slide {i}: unknown table {v['table']!r}; use one of {', '.join(TABLES)}")
             if isinstance(v, dict) and "metric" in v and v["metric"] not in HEROES:
@@ -192,10 +225,10 @@ def validate(spec: dict, data: dict) -> list[str]:
             if name == "steps" and v != "auto" and not (isinstance(v, list) and 2 <= len(v) <= 5 and all(
                     isinstance(x, dict) and x.get("when") and x.get("head") for x in v)):
                 errs.append(f"slide {i}: steps is \"auto\" or a list of two to five {{when, head, body}}")
-    for where, t in spec_text(spec):
-        bad = check_text(t, data)
-        if bad:
-            errs.append(f"{where}: numbers not in the data: {', '.join(bad)}")
+    for r in refused_numbers(spec, data):
+        errs.append(f"slide {r['slide']} {r['where']}: numbers not in the data: {', '.join(r['numbers'])}"
+                    + (" (a title or so-what quotes the latest value; name the period to quote an earlier one)"
+                       if r["where"] in ("title", "so_what") else ""))
     return errs
 
 
@@ -231,6 +264,13 @@ def put(ph, paras, size=None, color=None):
                 f.italic = o["italic"]
             if o.get("font"):
                 f.name = o["font"]
+            if CJK.search(chunk):
+                rpr = r._r.get_or_add_rPr()
+                ea = rpr.find(qn("a:ea"))
+                if ea is None:
+                    ea = rpr.makeelement(qn("a:ea"), {})
+                    rpr.append(ea)
+                ea.set("typeface", CJK_FONT)
 
 
 EMPH = re.compile(r"\*([^*]+)\*")
@@ -337,11 +377,26 @@ class Painter:
             chart.value_axis.has_major_gridlines = False
             chart.value_axis.visible = False
 
-    def chart(self, ph, key):
+    def chart(self, ph, key, opts=None):
         d, c = self.d, self.c
+        opts = opts or {}
         cd = CategoryChartData()
-        if key == "vacancy":
-            rows = d["vacancy"]
+
+        def pick(rows, by_market):
+            if opts.get("last") and not by_market:
+                rows = rows[-int(opts["last"]):]
+            if opts.get("markets") and by_market:
+                want = [m.lower() for m in opts["markets"]]
+                rows = [r for r in rows if r["market"].lower() in want] or rows
+            return rows
+        if key == "vacancy" and opts.get("type") in ("bar", "column"):
+            rows = pick(d["vacancy"], False)
+            cd.categories = [r["period"] for r in rows]
+            cd.add_series("Vacancy", [r["value"] for r in rows])
+            self.bars(ph.insert_chart(CHART_TYPES[opts["type"]], cd).chart, '0.0"%"', highlight=[len(rows) - 1],
+                      horizontal=opts["type"] == "bar")
+        elif key == "vacancy":
+            rows = pick(d["vacancy"], False)
             cd.categories = [r["period"] for r in rows]
             vals = [r["value"] for r in rows]
             cd.add_series("Vacancy", vals)
@@ -362,19 +417,28 @@ class Painter:
             va = chart.value_axis
             va.tick_labels.number_format, va.tick_labels.number_format_is_linked = '0.0"%"', False
             va.minimum_scale, va.maximum_scale = max(0, round(min(vals) - 1)), round(max(vals) + 1)
-        elif key == "take_up":
-            rows = d["take_up"]
+        elif key == "take_up" and opts.get("type") == "line":
+            rows = pick(d["take_up"], False)
             cd.categories = [r["period"] for r in rows]
             cd.add_series("Take-up", [r["value"] for r in rows])
-            self.bars(ph.insert_chart(XL_CHART_TYPE.COLUMN_CLUSTERED, cd).chart, "0.00", highlight=[len(rows) - 1])
+            chart = ph.insert_chart(XL_CHART_TYPE.LINE_MARKERS, cd).chart
+            self.style(chart)
+            ser = chart.plots[0].series[0]
+            ser.format.line.color.rgb, ser.format.line.width = rgb(c["series1"]), Pt(2.25)
+        elif key == "take_up":
+            rows = pick(d["take_up"], False)
+            cd.categories = [r["period"] for r in rows]
+            cd.add_series("Take-up", [r["value"] for r in rows])
+            self.bars(ph.insert_chart(CHART_TYPES.get(opts.get("type", "column"), XL_CHART_TYPE.COLUMN_CLUSTERED), cd).chart,
+                      "0.00", highlight=[len(rows) - 1], horizontal=opts.get("type") == "bar")
         elif key == "rents":
-            rows = d["rents"][:14]
+            rows = pick(d["rents"], True)[:14]
             cd.categories = [r["market"] for r in rows]
             cd.add_series("Prime rent", [r["value"] for r in rows])
-            self.bars(ph.insert_chart(XL_CHART_TYPE.BAR_CLUSTERED, cd).chart, '"£"0.00',
-                      highlight=[i for i, r in enumerate(rows) if r["change"]], horizontal=True)
+            self.bars(ph.insert_chart(CHART_TYPES.get(opts.get("type", "bar"), XL_CHART_TYPE.BAR_CLUSTERED), cd).chart, '"£"0.00',
+                      highlight=[i for i, r in enumerate(rows) if r["change"]], horizontal=opts.get("type", "bar") == "bar")
         elif key == "investment":
-            rows = d["investment"]
+            rows = pick(d["investment"], True)
             cd.categories = [r["market"] for r in rows]
             cd.add_series(rows[0]["period"], [r["value"] for r in rows])
             cd.add_series("Long-term average", [r["lta"] or 0 for r in rows])
@@ -745,6 +809,9 @@ def build(d: dict, out: str | Path, spec: dict | None = None, theme: str | None 
     if theme:
         spec["theme"] = theme
     spec.setdefault("theme", DEFAULT_THEME)
+    for s in spec.get("slides") or []:
+        if isinstance(s, dict) and not s.get("id"):  # a stable identity, so an edit is tracked by id, not by title
+            s["id"] = "s" + uuid.uuid4().hex[:6]
     errs = validate(spec, d)
     if errs:
         raise ValueError("; ".join(errs))
@@ -830,7 +897,7 @@ def build(d: dict, out: str | Path, spec: dict | None = None, theme: str | None 
             if ph is None:
                 continue
             if isinstance(v, dict) and "chart" in v:
-                paint.chart(ph, v["chart"])
+                paint.chart(ph, v["chart"], v)
             elif isinstance(v, dict) and "table" in v:
                 x, y, w, _ = area(ph)
                 drop(ph)
@@ -851,8 +918,8 @@ def build(d: dict, out: str | Path, spec: dict | None = None, theme: str | None 
     prs.core_properties.title = d["title"]
     prs.core_properties.author = "London Office Market Agent"
     prs.save(str(out))
-    return {"path": str(out), "theme": spec["theme"],
-            "slides": [{"layout": s["layout"], "title": s.get("title", "")} for s in spec["slides"]]}
+    return {"path": str(out), "theme": spec["theme"], "spec": spec,
+            "slides": [{"layout": s["layout"], "title": s.get("title", ""), "id": s.get("id")} for s in spec["slides"]]}
 
 
 if __name__ == "__main__":

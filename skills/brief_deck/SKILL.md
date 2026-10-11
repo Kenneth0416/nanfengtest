@@ -54,7 +54,10 @@ Two charts: `left_label`, `left_chart`, `right_label`, `right_chart`, `source` �
 `talk: "auto"` · Sources: `body: "auto"` · Title only: `table`.
 
 Keys: charts `vacancy`, `take_up`, `rents`, `investment`; tables `yields`, `evidence` (IC); hero metrics
-`vacancy_pct`, `take_up_msqft`, `investment_gbp_bn`, `active_requirements_msqft`, `bank_rate`.
+`vacancy_pct`, `take_up_msqft`, `investment_gbp_bn`, `active_requirements_msqft`, `bank_rate`. A chart may
+take `last` (2-20 periods), `markets` (a list of submarkets) or `type` (`line`, `bar`, `column`). A title or
+so-what may quote only the latest value of a series; to quote an earlier one, name its period ("9.9% in
+Q1 2024"). Every built slide carries an `id`: keep it when you edit a deck, so a retitled slide stays itself.
 `so_what` goes on Hero number, Stat row, Chart + takeaway, Two charts, Chart + table, Numbered pillars,
 Timeline and Title only.
 

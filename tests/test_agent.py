@@ -1566,3 +1566,71 @@ def test_the_copilot_edit_request_carries_the_current_spec():
     ask = Engine.deck_edit_ask("board", "navy-gold", spec, "remove the deals slide")
     assert '"layout": "Cover"' in ask and "remove the deals slide" in ask and "build_brief_pptx" in ask
     assert "Build this week's team brief deck as a IC pack on the data-white theme" in Engine.deck_ask("ic", "data-white")
+
+
+def test_the_rule_editor_handles_batches_pages_charts_undo_and_chinese(deck_app):
+    """The coverage review's acceptance sentences that need no Copilot: several commands in one message, several
+    pages at once (English and Chinese), slide ids that survive edits, chart parameters, Sources/cover protection
+    with a Chinese explanation, undo and format switches as special results, vague requests answered with a
+    targeted question, and 'add' requests that would invent data answered instead of faked."""
+    from core import deck_edit as de
+    from skills.brief_deck import tools as bd
+    spec = deck_app.call("build_brief_pptx", {"format": "board"}, "Kenneth")["data"]["spec"]
+    stories = bd.deck_data(deck_app.ctx, "board")["stories"]
+    ids = [s["id"] for s in spec["slides"]]
+    assert all(ids) and len(set(ids)) == len(ids)
+    n = len(spec["slides"])
+    new, said = de.apply("刪第3頁，然後換森林主題", spec, stories)
+    assert len(new["slides"]) == n - 1 and new["theme"] == "forest-cream" and "✓" in said and "森林" not in said.split("✓")[0]
+    assert [s["id"] for s in new["slides"]] == ids[:2] + ids[3:]  # the others keep their ids
+    new, said = de.apply("刪第2和第3頁", spec, stories)
+    assert len(new["slides"]) == n - 2 and "第 2 頁" in said and "第 3 頁" in said
+    new, _ = de.apply("remove slides 2 to 3", spec, stories)
+    assert len(new["slides"]) == n - 2
+    new, said = de.apply('slide 2 "A" and slide 3 "B"', spec, stories)
+    assert new["slides"][1]["title"] == "A" and new["slides"][2]["title"] == "B"
+    assert "retitled" in de.describe(spec, new, "x") and "Removed" not in de.describe(spec, new, "x")
+    assert de.apply("刪除最後一頁", spec, stories)[0] is None and "Sources" in de.apply("刪除最後一頁", spec, stories)[1]
+    assert de.apply("撤銷上一步", spec, stories)[0] == {"undo": 1}
+    assert de.apply("回到初版", spec, stories)[0] == {"undo": "first"}
+    assert de.apply("restore version 2", spec, stories)[0] == {"undo": ("version", 2)}
+    assert de.apply("做一個 IC 版", spec, stories)[0] == {"switch": "ic"}
+    assert "PDF" in de.apply("export as PDF", spec, stories)[1] and de.apply("make it 4:3", spec, stories)[0] is None
+    # charts: range, markets, type, and a swap, all as parameters the painter reads
+    new, said = de.apply("只顯示最近四季的空置率", spec, stories)
+    chart = next(v for s in new["slides"] for v in (s.get("fill") or {}).values() if isinstance(v, dict) and v.get("chart") == "vacancy")
+    assert chart["last"] == 4
+    new, _ = de.apply("only West End Core and City Core on slide 3", spec, stories)
+    assert next(v for v in new["slides"][2]["fill"].values() if isinstance(v, dict) and "chart" in v)["markets"] == ["West End Core", "City Core"]
+    new, _ = de.apply("as a line chart on slide 2", spec, stories)
+    assert any(v.get("type") == "line" for v in new["slides"][1]["fill"].values() if isinstance(v, dict))
+    built = deck_app.call("build_brief_pptx", {"format": "board", "spec": new}, "Kenneth")["data"]
+    assert built.get("path")
+    # shorten to N, 'this slide', vague, and adds that would invent data
+    new, said = de.apply("精簡成 4 頁", spec, stories)
+    assert len(new["slides"]) == 4 and new["slides"][0]["layout"] == "Cover" and new["slides"][-1]["layout"] == "Sources"
+    assert "slide 3" in de.apply("This slide is wrong", spec, stories, sel=3)[1] and "第 3 頁" in de.apply("這頁不對", spec, stories, sel=3)[1]
+    assert de.apply("Make it better", spec, stories, sel=3)[0] is None
+    assert de.apply("Add our logo", spec, stories)[0] is None and "every slide" in de.apply("Add our logo", spec, stories)[1]
+    assert de.apply("加一頁講 Midtown", spec, stories)[0] is None and "Midtown" in de.apply("加一頁講 Midtown", spec, stories)[1]
+    assert "slide" in de.apply("Add a chart of yields", spec, stories)[1]
+    new, said = de.apply("Add a statement slide saying vacancy hit 47.3%", spec, stories)
+    refused = deck_app.call("build_brief_pptx", {"format": "board", "spec": new}, "Kenneth")["data"]
+    assert refused.get("refused_numbers") and refused["refused_numbers"][0]["numbers"] == ["47.3"] and refused["latest"]["vacancy_pct"] == "8.0%"
+    new, _ = de.apply('第2頁標題改成「空置率升到 9.9%」', spec, stories)
+    assert deck_app.call("build_brief_pptx", {"format": "board", "spec": new}, "Kenneth")["data"].get("refused_numbers")
+    new, _ = de.apply('第2頁標題改成「Q1 2024 空置率 9.9%」', spec, stories)
+    assert deck_app.call("build_brief_pptx", {"format": "board", "spec": new}, "Kenneth")["data"].get("path")  # a period names the past
+    new, said = de.apply("加一頁講利率，放在第 3 頁", spec, stories)
+    assert new and new["slides"][2]["key"] == "macro" and "3. " in said
+    assert de.apply("Use a theme suitable for a client update", spec, stories)[0]["theme"] == "forest-cream"
+    assert "navy-gold" in de.apply("換成深藍色", spec, stories)[1]  # already on it
+    assert bd.deck_request("幫我把這週的 brief 做成 PPT，給投委會用") == ("ic", "data-white")
+    assert de.asks_removal("Make it shorter for the board, three minutes max") and not de.asks_removal("需要多兩頁")
+
+
+def test_the_copilot_edit_prompt_names_the_selected_slide_and_keeps_ids():
+    from core.engine import Engine
+    spec = {"theme": "navy-gold", "slides": [{"layout": "Cover", "title": "T", "id": "s1"}, {"layout": "Statement", "title": "U", "id": "s2"}]}
+    ask = Engine.deck_edit_ask("board", "navy-gold", spec, "this slide is wrong", sel=2)
+    assert "looking at slide 2 (id s2)" in ask and "Keep every slide's `id`" in ask and "`last`" in ask

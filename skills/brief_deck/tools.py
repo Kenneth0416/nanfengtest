@@ -44,10 +44,13 @@ from skills.brief_deck import planner  # noqa: E402
 THEMES = list(build_deck.THEMES)
 chg_text = build_deck.chg_text
 
-_DECK_WORDS = ("slide", "deck", "pptx", "powerpoint", "presentation")
+_DECK_WORDS = ("slide", "deck", "pptx", "ppt", "powerpoint", "presentation", "簡報", "简报", "投影片", "幻燈片", "幻灯片")
 _THEME_WORDS = {"forest": "forest-cream", "green": "forest-cream", "charcoal": "charcoal-amber", "amber": "charcoal-amber",
                 "dark": "charcoal-amber", "navy": "navy-gold", "gold": "navy-gold", "editorial": "editorial-cream",
-                "cream": "editorial-cream", "white": "data-white", "data white": "data-white"}
+                "cream": "editorial-cream", "white": "data-white", "data white": "data-white",
+                "client": "forest-cream", "客戶": "forest-cream", "客户": "forest-cream", "research": "editorial-cream",
+                "研究": "editorial-cream", "screen": "charcoal-amber", "投影": "charcoal-amber", "森林": "forest-cream",
+                "深色": "charcoal-amber", "炭": "charcoal-amber", "深藍": "navy-gold", "深蓝": "navy-gold", "白": "data-white"}
 
 
 def deck_request(text: str) -> tuple[str, str] | None:
@@ -56,7 +59,7 @@ def deck_request(text: str) -> tuple[str, str] | None:
     t = text.lower()
     if not any(w in t for w in _DECK_WORDS):
         return None
-    ic = bool(re.search(r"\bic\b|investment committee", t))
+    ic = bool(re.search(r"\bic\b|investment committee|投委會|投委会|投資委員會|投资委员会", t))
     theme = next((v for k, v in _THEME_WORDS.items() if k in t), "data-white" if ic else "navy-gold")
     return ("ic" if ic else "board", theme)
 
@@ -223,8 +226,14 @@ def build_brief_pptx(ctx, args):
     try:
         built = build_deck.build(dd, str(path), spec, theme)
     except ValueError as e:
+        # structured: which numbers were refused where, and the latest values a title may quote instead
+        numbers = build_deck.refused_numbers({**spec, "theme": theme or spec.get("theme")}, dd)
+        latest = {k["metric"]: k.get("text", "") for k in d.get("kpis") or [] if k.get("metric")}
         return {"summary": f"Not built: {e}. Rewrite that text with the figures as the data gives them, or without "
-                           f"the number, and call again.", "data": {"error": str(e), "refused": [str(e)]}}
+                           f"the number, and call again.", "data": {"error": str(e), "refused": [str(e)],
+                                                                    "refused_numbers": numbers, "latest": latest,
+                                                                    "slides_given": len(spec.get("slides") or [])}}
+    spec = built["spec"]  # with the ids the build gave new slides
     report = check_deck.check(str(path), dd)
     slides = built["slides"]
     lines = "\n".join(f"{i + 1}. [{s['layout']}] {s['title']}" for i, s in enumerate(slides))

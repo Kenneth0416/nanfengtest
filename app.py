@@ -1048,10 +1048,13 @@ def copilot_thread(turns, ctx, question):
             how = hit["data"]["how"] if hit else build_deck_now(fmt, theme)[0]
             hit = hit or cached_deck(fmt, theme)
             if how and hit:
-                reply = (f"The Copilot is offline on this server, so rules picked the slides from this week's data: "
-                         f"{fx.BRIEF_FORMATS[fmt].lower()}, {DECK_THEMES[theme]}. The numbers and sources are the same; "
-                         "the choice of slides and the titles are standard.\n\n"
-                         + "\n".join(f"- {line}" for line in hit["data"].get("slides") or []))
+                lines = "\n".join(f"- {line}" for line in hit["data"].get("slides") or [])
+                reply = ((f"這台伺服器上 Copilot 離線，所以由規則從本週數據選頁：{fx.BRIEF_FORMATS[fmt]}、{DECK_THEMES[theme]}。"
+                          f"數字與來源相同，只是頁面取捨與標題是標準版。要改頁面請到 Team brief 按 Open editor。\n\n" + lines)
+                         if _de.is_zh(question) else
+                         (f"The Copilot is offline on this server, so rules picked the slides from this week's data: "
+                          f"{fx.BRIEF_FORMATS[fmt].lower()}, {DECK_THEMES[theme]}. The numbers and sources are the same; "
+                          "the choice of slides and the titles are standard. To change slides, open the editor on Team brief.\n\n" + lines))
                 st.markdown(reply)
                 st.download_button("Download .pptx", Path(hit["path"]).read_bytes(), key=f"dl_chat_{len(turns)}",
                                    file_name=Path(hit["path"]).name,
@@ -1603,22 +1606,48 @@ def cached_deck(fmt: str, theme: str) -> dict | None:
     return hit
 
 
-def store_deck(fmt, theme, built, how, note, shown, edits=None):
-    """Remember a built deck (its spec, slides, PDF and page images) against the data fingerprint."""
+MAX_VERSIONS = 20
+
+
+def store_deck(fmt, theme, built, how, note, shown, edits=None, versions=None, ver=1, pptx=None):
+    """Remember a built deck (its spec, slides, PDF and page images) against the data fingerprint. `versions`
+    are the earlier states of this deck (newest last), each with its own files, so Undo needs no rebuild."""
     fp = deck_fingerprint(fmt, built["theme"])
-    pptx = app.root / "data" / "exports" / "decks" / fp / f"london-office-team-brief-{fmt}-{built['theme']}.pptx"
+    pptx = pptx or (app.root / "data" / "exports" / "decks" / fp / f"v{ver}" / f"london-office-team-brief-{fmt}-{built['theme']}.pptx")
     data = {"theme": built["theme"], "format": fmt, "how": how, "note": note if how == "rules" and note else "",
             "slides": [f"{s['title']}" + (f" — {w}" if w else "") for s, w in zip(built["slides"], built.get("why") or [])],
             "titles": [s["title"] for s in built["slides"]], "layouts": [s["layout"] for s in built["slides"]],
             "problems": built.get("problems") or [], "spec": built.get("spec"), "edits": edits or [],
-            "pdf": shown["pdf"], "pages": shown["pages"], "preview_note": shown["why"]}
+            "pdf": shown["pdf"], "pages": shown["pages"], "preview_note": shown["why"],
+            "versions": (versions or [])[-MAX_VERSIONS:], "ver": ver}
     app.store.save_cached("deck", fp, data, str(pptx))
     return fp
 
 
-def deck_folder(fmt, built) -> Path:
-    """The deck's own folder under data/exports/decks/<fingerprint>/, with the .pptx copied in."""
-    folder = app.root / "data" / "exports" / "decks" / deck_fingerprint(fmt, built["theme"])
+def deck_version(hit) -> dict:
+    """The deck as it is now, kept aside before an edit replaces it: everything Undo needs to bring it back."""
+    d = hit["data"]
+    return {k: d.get(k) for k in ("theme", "format", "how", "note", "slides", "titles", "layouts", "problems", "spec",
+                                   "pdf", "pages", "preview_note", "ver")} | \
+        {"path": hit["path"], "instruction": (d.get("edits") or ["build"])[-1], "ts": datetime.now().isoformat(timespec="seconds"),
+         "edits": list(d.get("edits") or [])}
+
+
+def restore_version(fmt, theme, v, versions, instruction=""):
+    """Puts an earlier version back as the current deck (its files are still in their own folder)."""
+    fp = deck_fingerprint(fmt, v["theme"])
+    data = {k: v.get(k) for k in ("theme", "format", "how", "note", "slides", "titles", "layouts", "problems", "spec",
+                                   "pdf", "pages", "preview_note", "ver")} | \
+        {"edits": list(v.get("edits") or []), "versions": versions[-MAX_VERSIONS:]}
+    app.store.save_cached("deck", fp, data, v["path"])
+    if v["theme"] != theme:
+        app.store.forget_cached("deck", deck_fingerprint(fmt, theme))
+    return fp
+
+
+def deck_folder(fmt, built, ver=1) -> Path:
+    """The version's own folder under data/exports/decks/<fingerprint>/v<n>/, with the .pptx copied in."""
+    folder = app.root / "data" / "exports" / "decks" / deck_fingerprint(fmt, built["theme"]) / f"v{ver}"
     folder.mkdir(parents=True, exist_ok=True)
     pptx = folder / f"london-office-team-brief-{fmt}-{built['theme']}.pptx"
     pptx.write_bytes(Path(built["path"]).read_bytes())
@@ -1722,7 +1751,7 @@ def build_deck_now(fmt, theme, ui: EditorUI | None = None, chat_id: str | None =
             ui.done("Not built", "error")
             st.warning(out["summary"])
             return "", "", None
-    pptx = deck_folder(fmt, built)
+    pptx = deck_folder(fmt, built, 1)
     store_deck(fmt, theme, built, how, note, {"pdf": "", "pages": [], "why": "rendering"})  # a Stop keeps what is built
     shown = paint_pages(pptx, pptx.parent, built, ui, lambda sh: store_deck(fmt, theme, built, how, note, sh))
     store_deck(fmt, theme, built, how, note, shown)
@@ -1734,8 +1763,9 @@ def build_deck_now(fmt, theme, ui: EditorUI | None = None, chat_id: str | None =
 
 
 # ---------------------------------------------------------------- slide editor (a floating window)
-EDIT_PILLS_ON = ["Make slide 2's title shorter", "Add two more slides", "Swap slides 2 and 3", "Remove the deals slide"]
-EDIT_PILLS_OFF = ["Remove slide 3", "Add a slide on rents", "Move slide 3 to 2", "Theme forest"]
+EDIT_PILLS_ON = ["Make slide 2's title shorter", "Add two more slides", "Swap slides 2 and 3", "Shorten to 4 slides"]
+EDIT_PILLS_OFF = ["Remove slide 3", "Add a slide on rents", "Swap slides 2 and 3", "Theme forest"]
+APPLY_PENDING, KEEP_PENDING = "Apply that revision", "Keep the deck as it is"
 THEME_SHORT = {"navy-gold": "Navy gold", "editorial-cream": "Editorial", "data-white": "Data white",
                "charcoal-amber": "Charcoal", "forest-cream": "Forest"}
 
@@ -1767,10 +1797,17 @@ def _ed_rerun():
 
 
 def _deck_theme_pick():
+    """The theme control in the header. A deck that has been edited keeps its edits: the same spec is built again
+    on the new theme (the path a 'theme forest' instruction takes); an untouched deck opens that theme's own
+    build, planning it if it does not exist yet."""
     ed = st.session_state["deck_ed"]
     v = st.session_state.get("ed_theme")
     if v and v != ed["theme"]:
-        ed.update(theme=v, sel=1, build=not cached_deck(ed["fmt"], v))
+        hit = cached_deck(ed["fmt"], ed["theme"])
+        if hit and (hit["data"].get("edits") or hit["data"].get("versions")) and hit["data"].get("spec"):
+            st.session_state["deck_ask"] = (f"theme {v}", True)
+            return
+        ed.update(theme=v, sel=1, build=not cached_deck(ed["fmt"], v), theme_sync=True)
         open_chat(None, "_deck")
         st.session_state["deck_theme_want"] = (ed["fmt"], v)
 
@@ -1790,27 +1827,37 @@ def deck_history(sfx: str):
         st.caption(f"{when(c['updated'])} · {c['messages']} messages")
 
 
-def adopt_deck(ed, old_spec, built, instruction, ui: EditorUI, how, note, edits) -> str:
-    """A revised deck came back from the Copilot or the rule editor: refuse it if it dropped a slide nobody asked
-    to drop, else file it, repaint the pages one by one and describe what actually changed."""
+def adopt_deck(ed, hit, built, instruction, ui: EditorUI, how, note, force=False) -> str:
+    """A revised deck came back from the Copilot or the rule editor. If it dropped a slide (by id) that nobody
+    asked to drop, it is held back and the person gets Apply / Keep buttons; otherwise the current deck is kept
+    as a version, the new one is filed in its own folder, the pages are painted one by one and the reply
+    describes what actually changed, slide by slide."""
     fmt, theme = ed["fmt"], ed["theme"]
+    d = hit["data"]
+    old_spec = d.get("spec")
     zh = _de.is_zh(instruction)
     new_spec = built.get("spec") or {"theme": built["theme"], "slides": [{"title": x["title"], "layout": x["layout"]} for x in built["slides"]]}
-    old_titles = [x.get("title", "") for x in (old_spec or {}).get("slides", [])]
-    gone = [t for t in old_titles if t not in [x.get("title", "") for x in new_spec["slides"]]]
-    if gone and old_spec and not _de.asks_removal(instruction):
-        ui.done("Not applied", "error")
-        items = "; ".join(f"\"{t}\"" for t in gone)
-        return (f"這次修改會刪掉你沒有要求刪的頁：{items}，所以沒有套用，簡報維持原樣。要刪的話請明說（例如「刪第 3 頁」）。" if zh else
-                f"That revision would have dropped {items}, which you did not ask for, so it was not applied and the deck "
-                f"is unchanged. Say so explicitly (for example `remove slide 3`) if you do want it gone.")
-    pptx = deck_folder(fmt, built)
-    edits = edits + [instruction]
-    shown = paint_pages(pptx, pptx.parent, built, ui, lambda sh: store_deck(fmt, theme, built, how, note, sh, edits))
-    store_deck(fmt, theme, built, how, note, shown, edits)
+    new_ids = {x.get("id") for x in new_spec["slides"]}
+    gone = [x for x in (old_spec or {}).get("slides", []) if x.get("id") and x.get("id") not in new_ids]
+    if gone and not force and not _de.asks_removal(instruction):
+        ui.done("Waiting for your word", "error")
+        ed["confirm"] = {"built": built, "instruction": instruction, "how": how, "note": note}
+        items = "；".join(f"第 {i} 頁「{x.get('title', '')}」" for i, x in enumerate(old_spec["slides"], 1) if x in gone) if zh else \
+            "; ".join(f"slide {i} \"{x.get('title', '')}\"" for i, x in enumerate(old_spec["slides"], 1) if x in gone)
+        return (f"這次修改會刪掉你沒有要求刪的頁：{items}。要套用嗎？按下面的「套用」或「保持原樣」。" if zh else
+                f"That revision would also drop {items}, which you did not ask for. Apply it anyway, or keep the deck as "
+                f"it is? Use the two buttons below.")
+    ed.pop("confirm", None)
+    versions = list(d.get("versions") or []) + [deck_version(hit)]
+    ver = int(d.get("ver") or 1) + 1
+    edits = list(d.get("edits") or []) + [instruction]
+    pptx = deck_folder(fmt, built, ver)
+    keep = lambda sh: store_deck(fmt, theme, built, how, note, sh, edits, versions, ver, pptx)
+    shown = paint_pages(pptx, pptx.parent, built, ui, keep)
+    keep(shown)
     if built["theme"] != theme:  # the theme changed: the deck now lives under that theme
         app.store.forget_cached("deck", deck_fingerprint(fmt, theme))
-        ed["theme"] = built["theme"]
+        ed.update(theme=built["theme"], theme_sync=True)
         st.session_state["deck_theme_want"] = (fmt, built["theme"])
     ed["sel"] = min(ed.get("sel") or 1, len(built["slides"]))
     ui.done(f"{len(built['slides'])} slides · edited {len(edits)} time{'s' if len(edits) != 1 else ''} in the editor")
@@ -1822,43 +1869,123 @@ def adopt_deck(ed, old_spec, built, instruction, ui: EditorUI, how, note, edits)
     return reply
 
 
-def edit_deck(ed, hit, instruction, via_rules, chat_id, ui: EditorUI) -> Answer | None:
-    """One instruction from the editor's chat (or a stage button): the Copilot revises the spec and builds
-    again, streamed like any Copilot answer (status line, Stop); plain commands and the buttons go through the
-    rule editor, which also stands in when the Copilot is offline. Returns the turn to save, or None after a
-    Stop."""
-    fmt, theme = ed["fmt"], ed["theme"]
-    d = hit["data"]
-    spec = d.get("spec")
+def refusal_text(err: dict, instruction: str) -> str:
+    """Why a build was refused, in the instruction's language and with the figure the data does have."""
     zh = _de.is_zh(instruction)
-    if not spec:
-        return Answer("這份簡報是在編輯器出現之前建的，沒有可改的 spec，請先按 Build again。" if zh else
-                      "This deck was built before the editor existed, so I have no spec to change. Press Build again first.")
-    how, note, edits = d.get("how", "rules"), d.get("note", ""), list(d.get("edits") or [])
-    if engine.ready and not via_rules:
-        ans = stream_answer(engine.deck_edit_ask(fmt, theme, spec, instruction), chat_id, instruction,
-                            stream=engine.edit_deck_streaming(fmt, theme, spec, instruction, user, chat_id), slot="_deck")
-        if ans is None:
-            return None
-        built = engine.built_deck(ans)
-        if not built:  # the Copilot explained instead of building (or could not): its words are the answer
-            return ans
-        reply = adopt_deck(ed, spec, built, instruction, ui, how, note, edits)
-        return Answer(reply, ans.trace, ans.engine)
-    stories = _bd.deck_data(app.ctx, fmt).get("stories") or []
-    new, said = _de.apply(instruction, spec, stories)
-    if not new:
-        ui.done("No change")
-        return Answer(said)
+    latest = err.get("latest") or {}
+    names = {"vacancy_pct": ("vacancy", "空置率"), "take_up_msqft": ("take-up", "去化量"), "investment_gbp_bn": ("investment", "投資額"),
+             "active_requirements_msqft": ("active requirements", "需求量"), "prime_rent": ("prime rent", "租金")}
+    lines = []
+    hints = {"vacancy_pct": ("vacancy", "空置"), "take_up_msqft": ("take-up", "take up", "去化"), "investment_gbp_bn": ("investment", "投資", "投资"),
+             "active_requirements_msqft": ("requirement", "demand", "需求"), "prime_rent": ("rent", "租金")}
+    for r in err.get("refused_numbers") or []:
+        nums = "、".join(r["numbers"]) if zh else ", ".join(r["numbers"])
+        low = (r.get("text") or "").lower()
+        about = {k: v for k, v in latest.items() if any(w in low for w in hints.get(k, ()))} or latest
+        now = "；".join(f"目前{names.get(k, (k, k))[1]} {v}" for k, v in about.items()) if zh else \
+            "; ".join(f"{names.get(k, (k, k))[0]} is {v}" for k, v in about.items())
+        where = {"title": ("title", "標題"), "so_what": ("so-what", "結論"), "notes": ("notes", "備註")}.get(r["where"], (r["where"], r["where"]))
+        lines.append(f"第 {r['slide']} 頁{where[1]}裡的 {nums} 不在本週數據裡（{now}），所以沒有套用。" if zh else
+                     f"{nums} in slide {r['slide']}'s {where[0]} is not in this week's data ({now}), so it was not applied.")
+    if not lines:
+        why = err.get("error") or ""
+        lines.append(f"沒有建成：{why}" if zh else f"Not built: {why}")
+    if any(r["where"] in ("title", "so_what") for r in err.get("refused_numbers") or []):
+        lines.append("標題和結論只接受最新一期的值；要引用舊值請寫明期間，例如「Q1 2024 的 9.9%」。" if zh else
+                     "Titles and so-whats quote the latest value; name the period to quote an earlier one (\"9.9% in Q1 2024\").")
+    return " ".join(lines)
+
+
+def rebuild_from_spec(ed, hit, new, instruction, ui: EditorUI, how, note) -> Answer:
+    """Builds the revised spec by rules and files it (or explains the refusal)."""
+    fmt = ed["fmt"]
+    zh = _de.is_zh(instruction)
     ui.say("Building the slides again…")
     out = app.call("build_brief_pptx", {"format": fmt, "theme": new["theme"], "spec": new}, user)
     built = out["data"] if out["data"].get("path") else None
     if not built:
         ui.done("Not built", "error")
-        why = out["data"].get("error") or out["summary"]
-        return Answer((f"沒有建成：{why}" if zh else f"Not built: {why}"))
-    reply = adopt_deck(ed, spec, built, instruction, ui, how, note, edits)
+        return Answer(refusal_text(out["data"], instruction) if out["data"].get("error") else (f"沒有建成：{out['summary']}" if zh else f"Not built: {out['summary']}"))
+    reply = adopt_deck(ed, hit, built, instruction, ui, how, note)
     return Answer(reply, [{"tool": "build_brief_pptx", "args": {"format": fmt, "theme": new["theme"]}, "result": out}], "rules")
+
+
+def edit_deck(ed, hit, instruction, via_rules, chat_id, ui: EditorUI) -> Answer | None:
+    """One instruction from the editor's chat (or a stage button): the Copilot revises the spec and builds
+    again, streamed like any Copilot answer (status line, Stop); plain commands and the buttons go through the
+    rule editor, which also stands in when the Copilot is offline or fails. Undo restores an earlier version
+    without a build; 'make an IC version' switches the format. Returns the turn to save, or None after a Stop."""
+    fmt, theme = ed["fmt"], ed["theme"]
+    d = hit["data"]
+    spec = d.get("spec")
+    zh = _de.is_zh(instruction)
+    sel = ed.get("sel") or 1
+    pending = ed.get("confirm")
+    if pending and instruction in (APPLY_PENDING, KEEP_PENDING, "套用", "保持原樣"):
+        ed.pop("confirm", None)
+        if instruction in (KEEP_PENDING, "保持原樣"):
+            ui.done("Kept as it was")
+            return Answer("好，簡報維持原樣。" if _de.is_zh(pending["instruction"]) else "Kept: the deck is as it was.")
+        reply = adopt_deck(ed, hit, pending["built"], pending["instruction"], ui, pending["how"], pending["note"], force=True)
+        return Answer(reply, [], "rules")
+    ed.pop("confirm", None)
+    if not spec:
+        return Answer("這份簡報是在編輯器出現之前建的，沒有可改的 spec，請先按 Build again。" if zh else
+                      "This deck was built before the editor existed, so I have no spec to change. Press Build again first.")
+    how, note = d.get("how", "rules"), d.get("note", "")
+    stories = _bd.deck_data(app.ctx, fmt).get("stories") or []
+    if len(stories) == 0 and not d.get("slides"):
+        return Answer("資料庫還沒有數據，請先在 Sources 更新，再建簡報。" if zh else "The library has no data yet: update it on Sources first, then build.")
+    # the rule editor first: undo, format switches and plain commands never need the Copilot
+    new, said = _de.apply(instruction, spec, stories, sel)
+    if isinstance(new, dict) and "undo" in new:
+        versions = list(d.get("versions") or [])
+        if not versions:
+            ui.done("No earlier version")
+            return Answer("這是第一版，沒有更早的版本可以回。" if zh else "This is the first version; there is nothing earlier to go back to.")
+        idx = 0 if new["undo"] == "first" else (new["undo"][1] - 1 if isinstance(new["undo"], tuple) else len(versions) - 1)
+        idx = min(max(idx, 0), len(versions) - 1)
+        v = versions[idx]
+        restore_version(fmt, theme, v, versions[:idx], instruction)
+        if v["theme"] != theme:
+            ed.update(theme=v["theme"], theme_sync=True)
+            st.session_state["deck_theme_want"] = (fmt, v["theme"])
+        ed["sel"] = min(sel, len(v.get("titles") or [1]))
+        ui.done(f"Back to version {v.get('ver', idx + 1)}")
+        what = v.get("instruction") or "build"
+        return Answer((f"已回到第 {v.get('ver', idx + 1)} 版（{'初版' if what == 'build' else '「' + what + '」之後'}），共 {len(v.get('titles') or [])} 頁。" if zh else
+                       f"Back to version {v.get('ver', idx + 1)} ({'the first build' if what == 'build' else 'after \"' + what + '\"'}): "
+                       f"{len(v.get('titles') or [])} slides."), [], "rules")
+    if isinstance(new, dict) and "switch" in new:
+        want = new["switch"]
+        if want == fmt:
+            return Answer(said)
+        ed.update(fmt=want, theme="data-white" if want == "ic" else "navy-gold", build=True, sel=1)
+        st.session_state["deck_theme_want"] = (ed["fmt"], ed["theme"])
+        open_chat(None, "_deck")
+        return Answer(said, [], "rules")
+    if engine.ready and not via_rules:
+        ans = stream_answer(engine.deck_edit_ask(fmt, theme, spec, instruction, sel), chat_id, instruction,
+                            stream=engine.edit_deck_streaming(fmt, theme, spec, instruction, user, chat_id, sel), slot="_deck")
+        if ans is None:  # the Copilot failed (a Stop never returns here): the rule editor stands in where it can
+            if new:
+                out = rebuild_from_spec(ed, hit, new, instruction, ui, how, note)
+                out.text = ("Copilot 這次沒回應，已用規則版完成。" if zh else "The Copilot did not answer this time; done by rules instead.") + "\n\n" + out.text
+                return out
+            return Answer(("Copilot 這次沒回應。" if zh else "The Copilot did not answer this time. ") + said)
+        built = engine.built_deck(ans)
+        if not built:  # the Copilot explained instead of building (or could not): its words are the answer
+            err = next((t["result"].get("data") for t in reversed(ans.trace)
+                        if t["tool"] == "build_brief_pptx" and (t["result"].get("data") or {}).get("refused_numbers")), None)
+            if err and not all(n in ans.text for r in err["refused_numbers"] for n in r["numbers"]):
+                return Answer(refusal_text(err, instruction) + ("\n\n" + ans.text if ans.text.strip() else ""), ans.trace, ans.engine)
+            return ans
+        reply = adopt_deck(ed, hit, built, instruction, ui, how, note)
+        return Answer(reply, ans.trace, ans.engine)
+    if not new:
+        ui.done("No change")
+        return Answer(said)
+    return rebuild_from_spec(ed, hit, new, instruction, ui, how, note)
 
 
 def _ed_ask(instruction, sel=None):
@@ -1898,6 +2025,8 @@ def deck_editor():
     with st.container(key="deck_top", horizontal=True, vertical_alignment="center", gap="small"):
         st.html(f'<div class="loa-cp-title">{ic("presentation", 18, "accent")}Slides <small>{esc(fx.BRIEF_FORMATS[fmt])}</small></div>',
                 width="content")
+        if ed.pop("theme_sync", False):
+            st.session_state["ed_theme"] = theme  # an instruction or Undo changed the theme: the control follows
         st.segmented_control("Theme", list(THEME_SHORT), format_func=THEME_SHORT.get, key="ed_theme",
                              default=theme, label_visibility="collapsed", on_change=_deck_theme_pick,
                              disabled=busy, width="content")
@@ -1921,6 +2050,20 @@ def deck_editor():
                 if d.get("pdf") and Path(d["pdf"]).exists():
                     st.download_button("PDF", Path(d["pdf"]).read_bytes(), file_name=Path(hit["path"]).stem + ".pdf",
                                        mime="application/pdf", key="ed_dl_pdf", width="content")
+        versions = d.get("versions") or []
+        if hit and not building:
+            if st.button("", icon=material("undo-2"), key="ed_undo", width="content", help="Undo the last change",
+                         disabled=busy or not versions):
+                _ed_ask("undo", sel)
+            if versions:
+                with st.popover(f"v{d.get('ver', 1)}", help="Earlier versions of this deck", width="content", disabled=busy):
+                    st.caption("Click a version to go back to it.")
+                    for i, v in enumerate(versions):
+                        what = v.get("instruction") or "build"
+                        if st.button(f"v{v.get('ver', i + 1)} · {'first build' if what == 'build' else what[:40]}",
+                                     key=f"ed_ver_{i}", width="stretch", type="tertiary",
+                                     help=f"{len(v.get('titles') or [])} slides · {v.get('ts', '')}"):
+                            _ed_ask(f"restore version {v.get('ver', i + 1)}", sel)
         with st.popover("", icon=material("history"), help="Your conversations about slides", width="content"):
             deck_history(sfx)
         if st.button("", icon=material("x"), key="ed_close", help="Close · Esc", width="content"):
@@ -1988,7 +2131,14 @@ def deck_editor():
         _ed_rerun()
     if not busy:
         with sugg.container():
-            if not turns:
+            if ed.get("confirm"):
+                zh_p = _de.is_zh(ed["confirm"].get("instruction", ""))
+                with st.container(horizontal=True, gap="small", key="ed_confirm"):
+                    if st.button("套用" if zh_p else "Apply", key="ed_apply", type="primary", icon=material("check")):
+                        _ed_ask(APPLY_PENDING, sel)
+                    if st.button("保持原樣" if zh_p else "Keep as it is", key="ed_keep", icon=material("x")):
+                        _ed_ask(KEEP_PENDING, sel)
+            elif not turns:
                 hello_state("Change the deck by asking.",
                             "Retitle a slide, add or remove one, change the order or the theme. "
                             + ("The Copilot revises the storyline and builds again; every figure stays checked against the data."

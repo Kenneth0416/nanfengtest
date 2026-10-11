@@ -156,13 +156,19 @@ class Engine:
                 "and its why.")
 
     @staticmethod
-    def deck_edit_ask(fmt: str, theme: str, spec: dict, instruction: str) -> str:
+    def deck_edit_ask(fmt: str, theme: str, spec: dict, instruction: str, sel: int | None = None) -> str:
         """An edit to a built deck: the current spec travels with the request so the Copilot changes only what
         was asked and builds the whole deck again from the revised spec."""
         return (f"The team is editing the {'IC' if fmt == 'ic' else 'board'} deck in the slide editor. Its current spec "
                 f"(theme {theme}, {len(spec.get('slides', []))} slides) is:\n```json\n{json.dumps(spec, ensure_ascii=False)}\n```\n"
                 f"They ask: {instruction}\n"
-                "Rules: do exactly what was asked and nothing else. Never remove, replace or merge a slide unless the "
+                + (f"The person is looking at slide {sel} (id {spec['slides'][sel - 1].get('id', '?')}); 'this slide' means that one.\n"
+                   if sel and 0 < sel <= len(spec.get("slides", [])) else "")
+                + "Rules: do exactly what was asked and nothing else. Keep every slide's `id` exactly as given (a slide "
+                "keeps its id when retitled, reworded, translated or moved); only a new slide has no id. Rewording, "
+                "shortening, translating or changing the tone of titles and so-whats is allowed as long as every figure "
+                "stays as the data gives it. A chart fill may carry `last` (2-20 periods), `markets` (a list of "
+                "submarkets) and `type` (line, bar or column). Never remove, replace or merge a slide unless the "
                 "instruction asks for that; if you cannot do what was asked without removing one, do not build: explain "
                 "why and ask. The editor allows up to 12 slides, so adding never requires dropping one. To add a slide "
                 "(or N slides), call brief_deck_data and take the best-ranked stories that are not already in the deck "
@@ -193,9 +199,9 @@ class Engine:
         return StreamingAnswer(self, self.deck_ask(fmt, theme), user, conversation)
 
     def edit_deck_streaming(self, fmt: str, theme: str, spec: dict, instruction: str, user: str,
-                            conversation: str | None = None) -> "StreamingAnswer":
+                            conversation: str | None = None, sel: int | None = None) -> "StreamingAnswer":
         self._check()
-        return StreamingAnswer(self, self.deck_edit_ask(fmt, theme, spec, instruction), user, conversation)
+        return StreamingAnswer(self, self.deck_edit_ask(fmt, theme, spec, instruction, sel), user, conversation)
 
     def read_upload(self, path, user: str) -> tuple[dict | None, list[str], str]:
         """A colleague's PDF upload, read by the information agent for their review.

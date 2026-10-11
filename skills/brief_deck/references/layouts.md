@@ -41,5 +41,11 @@ leasing risk or strategy.
 | table | `evidence` | IC: submarket x prime rent, rent-free, vacancy, yield, investment |
 | hero | `vacancy_pct`, `take_up_msqft`, `investment_gbp_bn`, `active_requirements_msqft`, `bank_rate` | the figure, its caption and change |
 
+A chart key may carry parameters; the data still comes from Python, the spec only says how much of it to show:
+`{"chart": "vacancy", "last": 4}` (the last N periods, 2-20, for `vacancy` and `take_up`),
+`{"chart": "rents", "markets": ["West End Core", "City Core"]}` (only those submarkets, for `rents` and
+`investment`), `{"chart": "take_up", "type": "line"}` (`line`, `bar` or `column`). Every slide gets an `id`
+when it is built; keep it on every edit so the editor can tell a retitled slide from a replaced one.
+
 Geometry (16:9, 13.333 x 7.5 in) lives in `templates/build_template.js`; the renderer never places
 template content by coordinates.
