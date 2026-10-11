@@ -1,8 +1,9 @@
 // Shared by the Copilot engine (agent.ts) and the gatherer (gather.ts): Python tools over the local
 // bridge become Pi Durable tools, and the model is picked from the environment.
 import {
-	createModels, fauxAssistantMessage, fauxProvider, fauxText, fauxToolCall, Type,
+	createModels, createProvider, fauxAssistantMessage, fauxProvider, fauxText, fauxToolCall, Type,
 } from "@earendil-works/pi-ai";
+import { openAICompletionsApi } from "@earendil-works/pi-ai/api/openai-completions.lazy";
 import { anthropicProvider } from "@earendil-works/pi-ai/providers/anthropic";
 import { openaiProvider } from "@earendil-works/pi-ai/providers/openai";
 import { xiaomiProvider } from "@earendil-works/pi-ai/providers/xiaomi";
@@ -67,6 +68,21 @@ export async function manifest(): Promise<any> {
 
 // PI_FAUX=1 runs a scripted model for tests (no API key). PI_FAUX_SCRIPT points at a JSON list of
 // steps: {"tool": name, "args": {...}} for a tool call, or {"text": "..."} for the final answer.
+/** Pi's Xiaomi provider with `modelId` guaranteed in its catalog: a MiMo model newer than the catalog
+ *  (a config.yaml or MIMO_MODEL value Pi does not list yet) is added as a copy of the nearest listed one,
+ *  so the id still reaches the API instead of failing as "unknown model". */
+export function xiaomiWith(modelId: string) {
+	const base = xiaomiProvider();
+	const known = base.getModels();
+	if (known.some((m) => m.id === modelId)) return base;
+	const template = known.find((m) => m.id === "mimo-v2.6-pro") ?? known[known.length - 1];
+	return createProvider({
+		id: base.id, name: base.name, baseUrl: base.baseUrl, auth: base.auth as any,
+		models: [...known, { ...template, id: modelId, name: modelId }],
+		api: openAICompletionsApi(),
+	});
+}
+
 export function pickModel(models: ReturnType<typeof createModels>, defaultScript: any[]) {
 	if (env.PI_FAUX === "1") {
 		const faux = fauxProvider({});
@@ -78,8 +94,11 @@ export function pickModel(models: ReturnType<typeof createModels>, defaultScript
 		return { provider: faux.getModel().provider, modelId: faux.getModel().id };
 	}
 	if (env.XIAOMI_API_KEY) {  // the project default: Xiaomi MiMo (Python passes MIMO_API_KEY through as this)
-		models.setProvider(xiaomiProvider());
-		return { provider: "xiaomi", modelId: env.MIMO_MODEL ?? "mimo-v2.6-flash" };
+		// MIMO_MODEL is the Copilot's model for agent.ts (config llm.copilot_model) and the information
+		// agent's for info_agent.ts (llm.mimo_model); Python picks which to pass.
+		const modelId = env.MIMO_MODEL ?? "mimo-v2.6-flash";
+		models.setProvider(xiaomiWith(modelId));
+		return { provider: "xiaomi", modelId };
 	}
 	if (env.ANTHROPIC_API_KEY) {
 		models.setProvider(anthropicProvider());

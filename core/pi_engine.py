@@ -67,6 +67,15 @@ def system_prompt(app, role: str = "team") -> str:
 STORE_ERROR = re.compile(r"PathError|unresolvable path|SQLITE_|SqliteError|not a database|malformed|database is locked|"
                          r"Unexpected (end of JSON|token)|ENOENT.*conversations", re.I)
 
+def mimo_model(llm_cfg: dict, script: str) -> str:
+    """The MiMo model a Pi script runs on. The Copilot (agent.ts) has its own setting, `copilot_model`
+    (env MIMO_COPILOT_MODEL), so it can use a stronger or faster model than the information agent and the
+    short tool calls, which stay on `mimo_model` (env MIMO_MODEL)."""
+    shared = os.getenv("MIMO_MODEL", llm_cfg.get("mimo_model", "mimo-v2.6-flash"))
+    if script == "agent.ts":
+        return os.getenv("MIMO_COPILOT_MODEL", llm_cfg.get("copilot_model", shared))
+    return shared
+
 
 class PiDurableEngine:
     """One Pi Durable store per person (data/pi/<name>.sqlite + .json), so two people asking at once never
@@ -152,7 +161,7 @@ class PiDurableEngine:
                "PI_CONVERSATION_KEY": conversation or role,
                "ANTHROPIC_MODEL": os.getenv("ANTHROPIC_MODEL", llm_cfg.get("anthropic_model", "claude-opus-5-5")),
                "OPENAI_MODEL": os.getenv("OPENAI_MODEL", llm_cfg.get("openai_model", "gpt-5.5")),
-               "MIMO_MODEL": os.getenv("MIMO_MODEL", llm_cfg.get("mimo_model", "mimo-v2.6-flash"))}
+               "MIMO_MODEL": mimo_model(llm_cfg, script)}
         if os.getenv("MIMO_API_KEY") and not os.getenv("XIAOMI_API_KEY"):
             env["XIAOMI_API_KEY"] = os.environ["MIMO_API_KEY"]  # the name Pi's Xiaomi provider reads
         cmd = ["node", "--experimental-strip-types", "--no-warnings", str(self.dir / script)]

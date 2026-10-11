@@ -6,7 +6,8 @@ agent:
 
 llm:
   provider: auto            # auto | mimo | anthropic | openai | offline  (auto = whichever API key is set, MiMo first)
-  mimo_model: mimo-v2.6-flash
+  mimo_model: mimo-v2.6-flash               # information agent and short tool calls (classify, headline)
+  copilot_model: mimo-v2.6-pro-ultraspeed   # the Copilot's chat model (MiMo-V2.6-Pro-UltraSpeed); env MIMO_COPILOT_MODEL overrides
   mimo_base_url: https://api.xiaomimimo.com/v1
   anthropic_model: claude-opus-5-5
   anthropic_effort: medium

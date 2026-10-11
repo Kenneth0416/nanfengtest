@@ -532,6 +532,26 @@ def test_api_failure_reaches_the_user_as_one_plain_sentence(app, monkeypatch):
         eng.ask("What changed?", "Kenneth")
 
 
+def test_copilot_has_its_own_mimo_model(app, monkeypatch):
+    """The Copilot (agent.ts) runs on llm.copilot_model; the information agent and the short tool calls
+    stay on llm.mimo_model. Env overrides: MIMO_COPILOT_MODEL for the Copilot, MIMO_MODEL for the rest."""
+    from core.pi_engine import mimo_model
+    for k in ("MIMO_MODEL", "MIMO_COPILOT_MODEL"):
+        monkeypatch.delenv(k, raising=False)
+    cfg = app.config["llm"]
+    assert cfg["copilot_model"] == "mimo-v2.6-pro-ultraspeed" and cfg["mimo_model"] == "mimo-v2.6-flash"
+    assert mimo_model(cfg, "agent.ts") == "mimo-v2.6-pro-ultraspeed"
+    assert mimo_model(cfg, "info_agent.ts") == "mimo-v2.6-flash"
+    assert app.config["vision"]["model"] == "mimo-v2.6-flash"
+    assert mimo_model({}, "agent.ts") == "mimo-v2.6-flash"  # no copilot_model: the shared one
+    monkeypatch.setenv("MIMO_COPILOT_MODEL", "mimo-v2.6-pro")
+    assert mimo_model(cfg, "agent.ts") == "mimo-v2.6-pro" and mimo_model(cfg, "info_agent.ts") == "mimo-v2.6-flash"
+    monkeypatch.setenv("MIMO_MODEL", "mimo-v2.5")
+    assert mimo_model(cfg, "info_agent.ts") == "mimo-v2.5"
+    for name in ("README.md", ".env.example"):  # the docs name the Copilot's model
+        assert "mimo-v2.6-pro-ultraspeed" in (ROOT / name).read_text().lower()
+
+
 def test_a_mimo_key_powers_chat_vision_and_pi(app, monkeypatch):
     from core import llm as L
     from core.pi_engine import PiDurableEngine

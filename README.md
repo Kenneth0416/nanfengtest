@@ -113,7 +113,7 @@ tables, dashboards and charts are all read. The model returns each figure with i
 3. **Source check**: figures are compared with what other publishers reported for the same period.
 Figures that pass every check are shared as they are; the others are shared flagged until someone checks them.
 The PDF reader is its own setting (`vision` in config.yaml), so it can be a cheap vision model while the
-Copilot keeps its chat model. The default is Xiaomi MiMo-V2.6-Flash through its OpenAI-compatible API,
+Copilot keeps its chat model. The PDF reader's default is Xiaomi MiMo-V2.6-Flash through its OpenAI-compatible API,
 two pages per call with JSON-schema output: `export MIMO_API_KEY=...`. Without that key PDFs use the chat
 model; without any key, or if the vision call fails, a rule-based text extractor is used instead.
 `python scripts/eval_extraction.py <folder of PDFs named by source_id>` scores the extractor against the
@@ -158,7 +158,7 @@ and each saved chat keeps its own persistent conversation (one Pi store per pers
 
 ```bash
 cd pi_engine && npm ci && cd ..
-export MIMO_API_KEY=...           # Xiaomi MiMo-V2.6-Flash for everything: Copilot, information agent, PDFs
+export MIMO_API_KEY=...           # Xiaomi MiMo: Copilot on MiMo-V2.6-Pro-UltraSpeed, information agent and PDFs on MiMo-V2.6-Flash (config.yaml llm.copilot_model / llm.mimo_model / vision.model)
 # or
 export ANTHROPIC_API_KEY=...      # uses claude-opus-5-5 (configurable in config.yaml)
 # or
