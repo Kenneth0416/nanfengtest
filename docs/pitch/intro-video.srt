@@ -3,12 +3,12 @@
 London's office market moves every week.
 
 2
-00:00:06,233 --> 00:00:11,690
+00:00:06,233 --> 00:00:11,543
 The evidence is scattered across agency
 reports, public statistics, the news, and
 
 3
-00:00:11,690 --> 00:00:15,800
+00:00:11,543 --> 00:00:15,800
 colleagues' inboxes, and every hand-off loses
 a little of it.
 
@@ -45,12 +45,12 @@ Open data, such as Bank Rate and news, is
 collected automatically.
 
 11
-00:00:43,667 --> 00:00:49,456
+00:00:43,667 --> 00:00:49,537
 Agency reports, whose terms forbid scraping,
 are uploaded once by a colleague, and shared
 
 12
-00:00:49,456 --> 00:00:50,367
+00:00:49,537 --> 00:00:50,367
 with everyone.
 
 13
@@ -58,12 +58,12 @@ with everyone.
 Our own deals stay internal.
 
 14
-00:00:54,800 --> 00:01:00,269
+00:00:54,800 --> 00:01:00,270
 Behind the screen, a skill-based agent plans
 its steps, and calls Python tools to read,
 
 15
-00:01:00,269 --> 00:01:01,967
+00:01:00,270 --> 00:01:01,967
 check and analyse the data.
 
 16
@@ -117,12 +117,12 @@ or in Chinese.
 Here, we ask it to compare two submarkets.
 
 27
-00:01:46,367 --> 00:01:51,374
+00:01:46,367 --> 00:01:51,437
 The agent works through its steps, then
 replies with a table, charts, and the source
 
 28
-00:01:51,374 --> 00:01:52,567
+00:01:51,437 --> 00:01:52,567
 behind every number.
 
 29
@@ -135,12 +135,12 @@ colleagues, exactly as written.
 Heard something from a broker?
 
 31
-00:02:01,633 --> 00:02:07,364
+00:02:01,633 --> 00:02:07,583
 Share the link or the tip. It is filed,
 de-duplicated, and labelled as unverified, so
 
 32
-00:02:07,364 --> 00:02:10,533
+00:02:07,583 --> 00:02:10,533
 what one colleague hears, the whole team
 knows.
 
@@ -158,12 +158,12 @@ figure waits for a person to check.
 At the end of the week, open Team brief.
 
 36
-00:02:24,133 --> 00:02:28,919
+00:02:24,133 --> 00:02:28,643
 The paper is already written from the signals
 your team chose, with a footnote for every
 
 37
-00:02:28,919 --> 00:02:29,300
+00:02:28,643 --> 00:02:29,300
 figure.
 
 38
@@ -172,12 +172,12 @@ Download it in Word or PDF, or open Slides,
 and change the deck simply by asking.
 
 39
-00:02:37,200 --> 00:02:43,038
+00:02:37,200 --> 00:02:42,910
 One team, one set of numbers, and nothing lost
 along the way, from Monday's news to Friday's
 
 40
-00:02:43,038 --> 00:02:43,800
+00:02:42,910 --> 00:02:43,800
 board paper.
 
 41
