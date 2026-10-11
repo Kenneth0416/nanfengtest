@@ -140,8 +140,8 @@ header[data-testid="stHeader"] * { pointer-events:auto; }
   { display:none !important; }  /* stToolbar itself stays: it holds the sidebar-expand button */
 /* with the strip gone, content starts near the top instead of under a 6rem reservation */
 [data-testid="stMainBlockContainer"] { padding-top:1.5rem; }
-[data-testid="stSidebarUserContent"] { padding-top:0.5rem; }
-[data-testid="stSidebarHeader"] { padding:10px 16px 0 16px; height:auto; min-height:0; }  /* just the collapse button */
+[data-testid="stSidebarUserContent"] { padding-top:1.5rem; }  /* the logo lines up with the main area's top */
+[data-testid="stSidebarHeader"] { position:absolute; top:6px; right:4px; height:auto; min-height:0; padding:0; z-index:2; }  /* the collapse button floats beside the logo */
 @media (max-width:760px) { [data-testid="stMainBlockContainer"] { padding-top:3.5rem; } }  /* room for the expand button */
 body:has(.loa-cp-page) .loa-notice { margin:0 0 4px 0; }
 body:has(.loa-cp-page) [data-testid="stBottomBlockContainer"]::after, div[data-testid="stDialog"] .stElementContainer:has(> .stChatInput)::after
