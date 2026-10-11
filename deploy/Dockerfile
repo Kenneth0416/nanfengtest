@@ -2,8 +2,10 @@
 #   docker compose up            (from the repository root; see README "Try it in three steps")
 FROM python:3.13-slim
 
-# Node 22 for Pi Durable; poppler for PDF page images (uploaded reports, lease photos); curl for the healthcheck
+# Node 22 for Pi Durable; poppler for PDF page images (uploaded reports, lease photos, slide previews);
+# LibreOffice Impress renders the built deck to PDF for the slide preview; curl for the healthcheck
 RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certificates gnupg poppler-utils \
+    libreoffice-impress fonts-dejavu-core \
  && curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
  && apt-get install -y --no-install-recommends nodejs \
  && rm -rf /var/lib/apt/lists/*

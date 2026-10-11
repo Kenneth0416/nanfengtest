@@ -1,6 +1,7 @@
 """SQLite store for normalised data, user settings and feedback."""
 from __future__ import annotations
 
+import hashlib
 import json
 import uuid
 import sqlite3
@@ -27,6 +28,8 @@ CREATE TABLE IF NOT EXISTS user_seen (user TEXT PRIMARY KEY, last_seen TEXT);
 CREATE TABLE IF NOT EXISTS watch_rules (id INTEGER PRIMARY KEY AUTOINCREMENT, role TEXT, market TEXT,
     metric TEXT, op TEXT, value REAL, label TEXT);
 CREATE TABLE IF NOT EXISTS feedback (signal_id TEXT, role TEXT, vote INTEGER, ts TEXT DEFAULT CURRENT_TIMESTAMP);
+CREATE TABLE IF NOT EXISTS artifacts (kind TEXT, fingerprint TEXT, data TEXT, path TEXT,
+    ts TEXT DEFAULT CURRENT_TIMESTAMP, PRIMARY KEY (kind, fingerprint));
 CREATE TABLE IF NOT EXISTS answer_votes (message_id INTEGER, role TEXT, vote INTEGER, ts TEXT DEFAULT CURRENT_TIMESTAMP,
                                           PRIMARY KEY (message_id, role));
 CREATE TABLE IF NOT EXISTS user_focus (user TEXT, data TEXT, ts TEXT DEFAULT CURRENT_TIMESTAMP);
@@ -393,6 +396,37 @@ class Store:
 
     def liked_signals(self, role: str) -> set[str]:
         return {r["signal_id"] for r in self.q("SELECT signal_id FROM feedback WHERE role=? AND vote>0", (role,))}
+
+    # -- generated things (the brief, a deck) kept by the fingerprint of the data they were made from, so the
+    #    same data gives the same result without another model call; the fingerprint moves when anything
+    #    the brief or deck reads changes (figures, deals, news, internal deals, picked signals, team rules)
+    def data_fingerprint(self) -> str:
+        parts = []
+        for table, col in (("observations", "rowid"), ("deals", "rowid"), ("pipeline", "rowid"), ("macro", "rowid"),
+                           ("news", "published"), ("internal_deals", "updated"), ("sources", "rowid")):
+            r = self.q(f"SELECT COUNT(*) AS n, MAX({col}) AS m FROM {table}")[0]
+            parts.append(f"{table}:{r['n']}:{r['m']}")
+        parts.append("brief:" + ",".join(f"{r['signal_id']}@{r['ts']}" for r in
+                                         self.q("SELECT signal_id, ts FROM brief_items ORDER BY ts, rowid")))
+        parts.append("rules:" + ",".join(str(r["id"]) for r in self.q("SELECT id FROM watch_rules WHERE role='team' ORDER BY id")))
+        parts.append("checked:" + str(self.q("SELECT COUNT(*) AS n FROM checked")[0]["n"]))
+        return hashlib.sha1("|".join(parts).encode()).hexdigest()[:16]
+
+    def cached(self, kind: str, fingerprint: str) -> dict | None:
+        r = self.q("SELECT * FROM artifacts WHERE kind=? AND fingerprint=?", (kind, fingerprint))
+        if not r:
+            return None
+        row = r[0]
+        return {"data": json.loads(row["data"]) if row["data"] else None, "path": row["path"], "ts": row["ts"]}
+
+    def save_cached(self, kind: str, fingerprint: str, data, path: str = ""):
+        self.db.execute("INSERT OR REPLACE INTO artifacts (kind, fingerprint, data, path, ts) VALUES (?,?,?,?,CURRENT_TIMESTAMP)",
+                        (kind, fingerprint, json.dumps(data), path))
+        self.db.commit()
+
+    def forget_cached(self, kind: str, fingerprint: str):
+        self.db.execute("DELETE FROM artifacts WHERE kind=? AND fingerprint=?", (kind, fingerprint))
+        self.db.commit()
 
     # -- thumbs up / down on a Copilot answer (one vote per person per answer; 0 clears it) ------------
     def vote_answer(self, message_id: int, role: str, vote: int):

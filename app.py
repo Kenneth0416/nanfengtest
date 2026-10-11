@@ -27,6 +27,7 @@ import streamlit as st
 import streamlit.components.v1 as components
 
 from core import analytics as an
+from core import preview as _preview
 from core import documents
 from core import internal as I
 from core import focus as fx
@@ -964,16 +965,17 @@ def copilot_thread(turns, ctx, question):
         with st.chat_message("user"):
             st.markdown(question)
         with st.chat_message("assistant"):
-            how, _ = build_deck_now(fmt, theme)
-            key = deck_key(fmt)
-            if how:
+            hit = cached_deck(fmt, theme)  # the same data never builds twice
+            how = hit["data"]["how"] if hit else build_deck_now(fmt, theme)[0]
+            hit = hit or cached_deck(fmt, theme)
+            if how and hit:
                 reply = (f"The Copilot is offline on this server, so rules picked the slides from this week's data: "
                          f"{fx.BRIEF_FORMATS[fmt].lower()}, {DECK_THEMES[theme]}. The numbers and sources are the same; "
                          "the choice of slides and the titles are standard.\n\n"
-                         + "\n".join(f"- {line}" for line in st.session_state.get(key + "_slides") or []))
+                         + "\n".join(f"- {line}" for line in hit["data"].get("slides") or []))
                 st.markdown(reply)
-                st.download_button("Download .pptx", st.session_state[key], key=f"dl_chat_{len(turns)}",
-                                   file_name=f"london-office-team-brief-{fmt}-{theme}.pptx",
+                st.download_button("Download .pptx", Path(hit["path"]).read_bytes(), key=f"dl_chat_{len(turns)}",
+                                   file_name=Path(hit["path"]).name,
                                    mime="application/vnd.openxmlformats-officedocument.presentationml.presentation")
                 say("user", question)
                 say("assistant", reply)
@@ -1502,14 +1504,31 @@ def theme_swatches() -> str:
     return '<div style="line-height:22px">' + "".join(out) + "</div>"
 
 
-def deck_key(fmt):
-    return f"deck_{fmt}"
+def brief_fingerprint(fmt: str) -> str:
+    """What the brief is made from: the library's data fingerprint, the format, and whether a model writes the
+    headline. Same fingerprint, same brief: it is read back instead of written again."""
+    return f"{app.store.data_fingerprint()}-{fmt}-{'llm' if getattr(app.llm, 'available', False) else 'rules'}"
+
+
+def deck_fingerprint(fmt: str, theme: str) -> str:
+    return f"{app.store.data_fingerprint()}-{fmt}-{theme}-{'copilot' if engine.ready else 'rules'}"
+
+
+def cached_deck(fmt: str, theme: str) -> dict | None:
+    """The deck built from this data for this format and theme, if its files are still there."""
+    fp = deck_fingerprint(fmt, theme)
+    hit = app.store.cached("deck", fp)
+    if hit and not (hit["path"] and Path(hit["path"]).exists()):
+        app.store.forget_cached("deck", fp)  # data/ was cleared: build again when asked
+        return None
+    return hit
 
 
 def build_deck_now(fmt, theme):
     """The Copilot plans the deck from this week's data; without it the rule planner picks from the same stories.
-    Returns (how, note) and leaves the file bytes and the slide reasons in session state."""
-    key = deck_key(fmt)
+    The .pptx, its PDF and one image per slide are kept under data/exports/decks/<fingerprint>/ and remembered
+    against the data fingerprint, so the same data never builds twice. Returns (how, note)."""
+    fp = deck_fingerprint(fmt, theme)
     built, how, note = None, "", ""
     if engine.ready:
         with st.spinner("The Copilot is reading this week's data and planning the slides…"):
@@ -1525,58 +1544,74 @@ def build_deck_now(fmt, theme):
         if not built:
             st.warning(out["summary"])
             return "", ""
-    st.session_state[key] = Path(built["path"]).read_bytes()
-    st.session_state[key + "_built"] = theme
-    st.session_state[key + "_how"] = (how, note if how == "rules" and note else "")
-    st.session_state[key + "_slides"] = [f"{s['title']}" + (f" — {w}" if w else "")
-                                         for s, w in zip(built["slides"], built.get("why") or [])]
-    st.session_state[key + "_problems"] = built.get("problems") or []
-    app.store.log("brief", user, f"built the team brief slides ({fx.BRIEF_FORMATS[fmt].lower()}, {theme}, "
+    folder = app.root / "data" / "exports" / "decks" / fp
+    folder.mkdir(parents=True, exist_ok=True)
+    pptx = folder / f"london-office-team-brief-{fmt}-{built['theme']}.pptx"
+    pptx.write_bytes(Path(built["path"]).read_bytes())
+    with st.spinner("Rendering the slide preview…"):
+        shown = _preview.render(pptx, folder)
+    data = {"theme": built["theme"], "format": fmt, "how": how, "note": note if how == "rules" and note else "",
+            "slides": [f"{s['title']}" + (f" — {w}" if w else "") for s, w in zip(built["slides"], built.get("why") or [])],
+            "titles": [s["title"] for s in built["slides"]], "problems": built.get("problems") or [],
+            "pdf": shown["pdf"], "pages": shown["pages"], "preview_note": shown["why"]}
+    app.store.save_cached("deck", fp, data, str(pptx))
+    app.store.log("brief", user, f"built the team brief slides ({fx.BRIEF_FORMATS[fmt].lower()}, {built['theme']}, "
                                  f"{'storyline by the Copilot' if how == 'copilot' else 'rule-picked storyline'})")
     return how, note
 
 
 def deck_panel(fmt):
-    """One place for the slides: theme (with swatches), Build, then Download for the theme that was built.
-    A theme change after a build hides the stale download until the deck is built again."""
-    key = deck_key(fmt)
+    """One place for the slides: theme (with swatches), Build, and for a deck already built from this data the
+    preview (one image per slide), Download .pptx / .pdf, and why these slides. Changing the theme shows that
+    theme's deck if it was built, otherwise the Build button."""
     with st.container(border=True):
         st.markdown("**Slides**  ·  " + ("the Copilot reads this week's data and picks the slides, layouts and titles"
                                         if engine.ready else "picked by rules from this week's data (Copilot offline)"))
-        c = st.columns([2.4, 1.3, 1.3, 2.6], vertical_alignment="bottom")
+        c = st.columns([2.6, 1.3, 1.3, 1.0, 1.4], vertical_alignment="bottom")
         theme = c[0].selectbox("Slide theme", list(DECK_THEMES), format_func=DECK_THEMES.get, key=f"deck_theme_{fmt}",
                                index=list(DECK_THEMES).index("data-white" if fmt == "ic" else "navy-gold"),
                                help="Each format remembers its own theme. IC packs default to Data white.")
-        if c[1].button("Build slides", key=f"mk_{key}", width="stretch", type="primary" if not st.session_state.get(key) else "secondary",
-                       help="Plans a 3-6 slide deck from this week's data; takes a few seconds"):
+        hit = cached_deck(fmt, theme)
+        if c[1].button("Build again" if hit else "Build slides", key=f"mk_deck_{fmt}", width="stretch",
+                       type="secondary" if hit else "primary", icon=material("refresh-cw") if hit else None,
+                       help=("The slides for this data are already built; this plans them again" if hit else
+                             "Plans a 3-6 slide deck from this week's data; takes a few seconds")):
             build_deck_now(fmt, theme)
-        built_theme = st.session_state.get(key + "_built")
-        if st.session_state.get(key) and built_theme == theme:
-            c[2].download_button("Download .pptx", st.session_state[key],
-                                 file_name=f"london-office-team-brief-{fmt}-{built_theme}.pptx",
-                                 mime="application/vnd.openxmlformats-officedocument.presentationml.presentation",
-                                 key=f"dl_{key}", width="stretch", type="primary")
-            how, note = st.session_state.get(key + "_how") or ("", "")
-            with c[3]:
-                if how:
-                    label, plain = DECK_MSG[how]
-                    st.html(chip(label, "ok" if how == "copilot" else "warn")
-                            + f'<div class="loa-muted">{esc(plain)}</div>'
-                            + (f'<div class="loa-muted">{esc(note)}</div>' if note else ""))
-                with st.popover("Why these slides"):
-                    st.caption(f"{fx.BRIEF_FORMATS[fmt]} · {DECK_THEMES[built_theme]}")
-                    for line in st.session_state.get(key + "_slides") or []:
-                        st.markdown(f"- {line}")
-            for p in st.session_state.get(key + "_problems") or []:
-                st.html(f'<div class="loa-muted">{ic("triangle-alert", 13, "flag")}{esc(p)}</div>')
-        elif st.session_state.get(key):
-            c[3].html(chip("Theme changed", "warn")
-                      + f'<div class="loa-muted">Press Build slides to get {esc(DECK_THEMES[theme].split(" · ")[0])}; '
-                        f'the last build was {esc(DECK_THEMES[built_theme].split(" · ")[0])}.</div>')
-        else:
-            c[3].caption("Five house themes, 13 layouts, every number footnoted and checked against the data. For a "
+            hit = cached_deck(fmt, theme)
+        if not hit:
+            c[4].caption("Five house themes, 13 layouts, every number footnoted and checked against the data. For a "
                          "deck this button does not give you, ask Copilot: \"a client update on the forest theme that "
                          "only covers Midtown\".")
+            st.html(theme_swatches())
+            return
+        d = hit["data"]
+        c[2].download_button("Download .pptx", Path(hit["path"]).read_bytes(), file_name=Path(hit["path"]).name,
+                             mime="application/vnd.openxmlformats-officedocument.presentationml.presentation",
+                             key=f"dl_deck_{fmt}_{theme}", width="stretch", type="primary")
+        if d.get("pdf") and Path(d["pdf"]).exists():
+            c[3].download_button("PDF", Path(d["pdf"]).read_bytes(), file_name=Path(hit["path"]).stem + ".pdf",
+                                 mime="application/pdf", key=f"dl_pdf_{fmt}_{theme}", width="stretch")
+        label, plain = DECK_MSG[d["how"]]
+        st.html(f'<div class="loa-muted" style="margin:4px 0 8px 0">{chip(label, "ok" if d["how"] == "copilot" else "warn")}'
+                f'Built {esc(when(hit["ts"]))} · the data has not changed since'
+                + (f' · {esc(d["note"])}' if d.get("note") else "") + "</div>")
+        pages = [q for q in d.get("pages") or [] if Path(q).exists()]
+        if pages:
+            cols = st.columns(3)
+            for i, (q, title) in enumerate(zip(pages, d.get("titles") or [""] * len(pages))):
+                cols[i % 3].image(q, caption=f"{i + 1} · {title}" if title else str(i + 1), width="stretch")
+        else:
+            st.caption("No slide images on this server (" + (d.get("preview_note") or "preview not rendered")
+                       + "); the outline:")
+            for line in d.get("slides") or []:
+                st.markdown(f"- {line}")
+        row = st.columns([1.4, 4.6], vertical_alignment="center")
+        with row[0].popover("Why these slides", width="stretch"):
+            st.caption(f"{fx.BRIEF_FORMATS[fmt]} · {DECK_THEMES[d['theme']]}")
+            for line in d.get("slides") or []:
+                st.markdown(f"- {line}")
+        for q in d.get("problems") or []:
+            row[1].html(f'<div class="loa-muted">{ic("triangle-alert", 13, "flag")}{esc(q)}</div>')
         st.html(theme_swatches())
 
 
@@ -1591,7 +1626,6 @@ def brief_page():
             r[0].html(chip(it["title"]) + f'<span class="loa-muted">added by {esc(it["added_by"])}</span>')
             if r[1].button("", icon=":material/close:", type="tertiary", key=f"rm{it['id']}", help="Remove"):
                 app.store.remove_from_brief(it["id"])
-                st.session_state.pop("brief", None)
                 st.rerun()
     else:
         st.info("Nobody has added signals yet, so the brief uses the team's top signals. Use 'Add to brief' on "
@@ -1603,17 +1637,29 @@ def brief_page():
         fmt = st.segmented_control("Write it as", list(fx.BRIEF_FORMATS), default="board",
                                    format_func=fx.BRIEF_FORMATS.get, key="brief_fmt") or "board"
         st.caption(FORMAT_HELP[fmt])
-    key = (fmt, tuple(it["id"] for it in items))
-    if st.session_state.get("brief_key") != key:  # the text follows the picked signals and the format; same picks, same text
+    # The brief is written once per state of the data (and format): opening the page again reads it back.
+    # Only new data, a changed pick of signals, or "Write again" calls the model.
+    fp = brief_fingerprint(fmt)
+    hit = None if st.session_state.pop("brief_redo", False) else app.store.cached("brief", fp)
+    if hit:
+        brief, made = hit["data"], hit["ts"]
+    else:
         with st.spinner("Writing the brief…"):
-            st.session_state["brief"] = app.call("generate_brief", {"format": fmt}, user)["summary"]
-            st.session_state["brief_key"] = key
-    brief = st.session_state["brief"]
+            brief = app.call("generate_brief", {"format": fmt}, user)["summary"]
+        app.store.save_cached("brief", fp, brief)
+        made = app.store.cached("brief", fp)["ts"]
     row[1].download_button("Download (.md)", brief, file_name="london-office-team-brief.md", width="stretch")
     deck_panel(fmt)
     with st.container(border=True):
         st.html(f'<div class="loa-cobrand">{brand_img("cobrand-nanfung.svg", "", "London Office Market Agent · Nan Fung Group")}'
                 f'<span>{esc(fx.BRIEF_FORMATS[fmt])}</span></div>')
+        state = st.columns([5, 1.2], vertical_alignment="center")
+        state[0].html(f'<div class="loa-muted">Written {esc(when(made))} · the data has not changed since'
+                      + ("" if hit else " (just now)") + "</div>")
+        if state[1].button("Write again", key="brief_redo_btn", type="tertiary", icon=material("refresh-cw"),
+                           help="Writes the brief again from the same data"):
+            st.session_state["brief_redo"] = True
+            st.rerun()
         st.markdown(re.sub(r"^(#{1,2}) ", lambda m: "#" * (len(m.group(1)) + 2) + " ", brief, flags=re.M))
         # the chart follows the first picked signal that has a metric; London vacancy when nothing is picked
         lead = next((it for it in items if it.get("metric")), None)

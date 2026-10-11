@@ -585,6 +585,38 @@ def test_copilot_layout_pieces_exist():
     assert 'toolbarMode = "minimal"' in (ROOT / ".streamlit" / "config.toml").read_text()
 
 
+def test_generated_things_are_kept_by_data_fingerprint(app):
+    """The brief and the deck are remembered against a fingerprint of the data they were made from: the same data
+    reads them back (no model call), and the fingerprint moves when the picked signals or the data change."""
+    st = app.store
+    fp = st.data_fingerprint()
+    assert fp == st.data_fingerprint() and len(fp) == 16
+    assert st.cached("brief", fp) is None
+    st.save_cached("brief", fp, "## Board summary\nVacancy fell.", "")
+    assert st.cached("brief", fp)["data"].startswith("## Board summary")
+    st.add_to_brief({"id": "fp-test", "title": "Vacancy", "markets": ["London"]}, "Kenneth")
+    moved = st.data_fingerprint()
+    assert moved != fp and st.cached("brief", moved) is None
+    st.remove_from_brief("fp-test")
+    assert st.data_fingerprint() == fp and st.cached("brief", fp) is not None  # back to the same data, same brief
+    st.forget_cached("brief", fp)
+    assert st.cached("brief", fp) is None
+
+
+def test_deck_preview_renders_pdf_and_slide_images(deck_app, tmp_path):
+    """A built deck is rendered to a PDF and one PNG per slide for the Team brief page (needs LibreOffice and
+    poppler; on a server without them the page shows the outline and the .pptx only)."""
+    from core import preview
+    out = deck_app.call("build_brief_pptx", {"format": "board"}, "Kenneth")["data"]
+    have = preview.available()
+    shown = preview.render(out["path"], tmp_path / "prev")
+    if not have["soffice"]:
+        assert shown["pdf"] == "" and "LibreOffice" in shown["why"]
+        pytest.skip("LibreOffice not installed here")
+    assert Path(shown["pdf"]).exists() and len(shown["pages"]) == len(out["slides"])
+    assert all(Path(q).exists() for q in shown["pages"]) and shown["pages"][0].endswith("slide-1.png")
+
+
 def test_a_mimo_key_powers_chat_vision_and_pi(app, monkeypatch):
     from core import llm as L
     from core.pi_engine import PiDurableEngine
