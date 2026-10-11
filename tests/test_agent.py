@@ -1518,3 +1518,49 @@ def test_demo_deals_and_seed_news_say_what_they_are(app):
     assert all(f.get("connector") != "seed_research" for f in lib.feeds(app.store, app.config)), "ONS snapshot is not a live feed"
     last = lib.last_auto_update(app.store)
     assert "seed" not in last["text"] or "no live feeds" in last["text"]
+
+
+def test_slide_editor_edits_the_spec_by_instruction_and_rebuilds(deck_app, tmp_path):
+    """The slide editor's chat without the Copilot: plain commands change the built deck's spec (remove, move,
+    retitle, add a story, theme) and the deck is built again from it; the cover and sources stay in place and a
+    figure not in the data is still refused. Each page can be rendered on its own, so thumbnails appear one by one."""
+    from core import deck_edit, preview
+    out = deck_app.call("build_brief_pptx", {"format": "board"}, "Kenneth")["data"]
+    spec = out["spec"]
+    assert spec and len(spec["slides"]) == len(out["slides"]) and spec["slides"][0]["layout"] == "Cover"
+    from skills.brief_deck import tools as bd
+    stories = bd.deck_data(deck_app.ctx, "board")["stories"]
+    n = len(spec["slides"])
+    new, said = deck_edit.apply("remove slide 3", spec, stories)
+    assert len(new["slides"]) == n - 1 and "Removed slide 3" in said and new["slides"][0]["layout"] == "Cover"
+    assert new["slides"][1]["eyebrow"].startswith("02") and new["slides"][2]["eyebrow"].startswith("03")
+    assert deck_edit.apply("remove slide 1", spec, stories)[0] is None  # the cover is locked
+    moved, _ = deck_edit.apply("move slide 3 to 2", spec, stories)
+    assert moved["slides"][1]["key"] == spec["slides"][2]["key"] and moved["slides"][-1]["layout"] == "Sources"
+    titled, _ = deck_edit.apply('retitle slide 2 "Vacancy keeps falling"', spec, stories)
+    assert titled["slides"][1]["title"] == "Vacancy keeps falling"
+    themed, _ = deck_edit.apply("theme forest", spec, stories)
+    assert themed["theme"] == "forest-cream"
+    assert deck_edit.apply("make it pink", spec, stories) == (None, deck_edit.HELP)
+    # the revised spec builds; a made-up figure in a title is refused by the build, as before
+    built = deck_app.call("build_brief_pptx", {"format": "board", "theme": "navy-gold", "spec": titled}, "Kenneth")["data"]
+    assert built.get("path") and [s["title"] for s in built["slides"]][1] == "Vacancy keeps falling"
+    bad, _ = deck_edit.apply('retitle slide 2 "Vacancy fell to 12.7%"', spec, stories)
+    refused = deck_app.call("build_brief_pptx", {"format": "board", "spec": bad}, "Kenneth")
+    assert refused["data"].get("error") and "12.7" in refused["data"]["error"]
+    if not preview.available()["soffice"]:
+        pytest.skip("LibreOffice not installed here")
+    pdf, why = preview.render_pdf(built["path"], tmp_path / "pages")
+    assert pdf and not why and preview.page_count(pdf) == len(built["slides"])
+    seen = []
+    shown = preview.render(built["path"], tmp_path / "pages2", on_page=lambda n, t, p: seen.append((n, t)))
+    assert seen == [(k, len(built["slides"])) for k in range(1, len(built["slides"]) + 1)]
+    assert preview.render_page(pdf, 2, tmp_path / "pages").endswith("slide-2.png") and len(shown["pages"]) == len(seen)
+
+
+def test_the_copilot_edit_request_carries_the_current_spec():
+    from core.engine import Engine
+    spec = {"theme": "navy-gold", "slides": [{"layout": "Cover", "title": "T"}]}
+    ask = Engine.deck_edit_ask("board", "navy-gold", spec, "remove the deals slide")
+    assert '"layout": "Cover"' in ask and "remove the deals slide" in ask and "build_brief_pptx" in ask
+    assert "Build this week's team brief deck as a IC pack on the data-white theme" in Engine.deck_ask("ic", "data-white")

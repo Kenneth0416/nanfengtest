@@ -28,6 +28,7 @@ import streamlit.components.v1 as components
 
 from core import analytics as an
 from core import preview as _preview
+from core import deck_edit as _de
 from core import documents
 from core import internal as I
 from core import focus as fx
@@ -266,6 +267,46 @@ div[data-testid="stDialog"] section > div > div[data-testid="stVerticalBlock"] >
   { flex:1 0 auto; display:flex; flex-direction:column; }
 div[data-testid="stDialog"] .stElementContainer:has(> .stChatInput) { position:sticky; bottom:-20px; margin-top:auto;
   background:#fff; padding:8px 0 20px 0; z-index:5; }
+/* the slide editor: a wide floating window, three columns, thumbnails and chat scroll on their own */
+div[data-testid="stDialog"]:has(.loa-deck-ed) > div { width:calc(100vw - 48px) !important; max-width:calc(100vw - 48px) !important; height:calc(100vh - 48px); max-height:calc(100vh - 48px); margin:24px auto; border-radius:10px; box-shadow:0 24px 64px rgba(0,0,0,.28); overflow:hidden; }
+div[data-testid="stDialog"]:has(.loa-deck-ed) section { width:100% !important; max-width:none !important; max-height:calc(100vh - 48px); overflow-y:auto; }
+div[data-testid="stDialog"]:has(.loa-deck-ed) section > div { padding:0 20px 14px 20px; }
+@media (max-width:860px) { div[data-testid="stDialog"]:has(.loa-deck-ed) > div { width:100vw !important; max-width:100vw !important; height:100vh; max-height:100vh; margin:0; border-radius:0; }
+  div[data-testid="stDialog"]:has(.loa-deck-ed) section { max-height:100vh; }
+  div[data-testid="stDialog"]:has(.loa-deck-ed) [class*="st-key-deck_top"], div[data-testid="stDialog"]:has(.loa-deck-ed) [data-testid="stLayoutWrapper"]:has(> [class*="st-key-deck_top"]) { flex-wrap:wrap; }
+  div[data-testid="stDialog"]:has(.loa-deck-ed) .st-key-deck_thumbs > div[data-testid="stElementContainer"], div[data-testid="stDialog"]:has(.loa-deck-ed) .st-key-deck_thumbs > div > div[data-testid="stVerticalBlock"] { flex-direction:row; overflow-x:auto; gap:8px; }
+  div[data-testid="stDialog"]:has(.loa-deck-ed) .st-key-deck_thumbs [data-testid="stLayoutWrapper"]:has(> [class*="st-key-ed_th_"]), div[data-testid="stDialog"]:has(.loa-deck-ed) .st-key-deck_thumbs .stElementContainer:has(.loa-ed-planned) { flex:0 0 150px; width:150px; min-width:150px; }
+  div[data-testid="stDialog"]:has(.loa-deck-ed) [data-testid="stLayoutWrapper"]:has(> [class*="st-key-deck_top"]) { overflow-x:auto; }
+  div[data-testid="stDialog"]:has(.loa-deck-ed) .st-key-deck_thumbs { max-height:none; } }
+div[data-testid="stDialog"]:has(.loa-deck-ed) [class*="st-key-deck_top"], div[data-testid="stDialog"]:has(.loa-deck-ed) [data-testid="stLayoutWrapper"]:has(> [class*="st-key-deck_top"]) { position:sticky; top:-1px; background:var(--surface); z-index:6; padding:6px 0; flex-wrap:nowrap; }
+div[data-testid="stDialog"]:has(.loa-deck-ed) .st-key-deck_thumbs { max-height:calc(100vh - 170px); overflow-y:auto; padding-right:4px; }
+div[data-testid="stDialog"]:has(.loa-deck-ed) .st-key-deck_thread { max-height:calc(100vh - 270px); overflow-y:auto; padding-right:4px; }
+div[data-testid="stDialog"]:has(.loa-deck-ed) .stElementContainer:has(> .stChatInput) { position:static; padding:6px 0 0 0; }
+div[data-testid="stDialog"]:has(.loa-deck-ed) .st-key-deck_thumbs img { border:1px solid var(--line); border-radius:4px; }
+div[data-testid="stDialog"]:has(.loa-deck-ed) .st-key-deck_thumbs .stButton button { justify-content:flex-start; font-size:12px; min-height:28px; padding:2px 8px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+div[data-testid="stDialog"]:has(.loa-deck-ed) .st-key-deck_stage img { border:1px solid var(--line); border-radius:6px; box-shadow:0 6px 24px rgba(15,26,42,.12); }
+div[data-testid="stDialog"]:has(.loa-deck-ed) .st-key-deck_chat [data-testid="stChatMessage"] { padding:6px 0; }
+div[data-testid="stDialog"]:has(.loa-deck-ed) [class*="st-key-ed_th_"] { position:relative; padding:4px 4px 2px 22px; border-radius:6px; gap:2px; }
+div[data-testid="stDialog"]:has(.loa-deck-ed) [class*="st-key-ed_th_"][class*="_on"] { background:var(--accent-soft, #e8eef7); }
+div[data-testid="stDialog"]:has(.loa-deck-ed) [class*="st-key-ed_th_"][class*="_on"] img { outline:2px solid var(--accent); outline-offset:0; }
+.loa-ed-num { position:absolute; left:6px; top:6px; font-family:var(--f-mono, ui-monospace, monospace); font-size:11px; color:var(--ink3); }
+.loa-ed-lay { font-size:11px; color:var(--ink3); line-height:14px; }
+.loa-ed-planned { position:relative; padding:4px 4px 2px 22px; }
+.loa-ed-frame { aspect-ratio:16/9; border:1px dashed var(--line); border-radius:4px; display:flex; align-items:center; justify-content:center;
+  font-size:11px; color:var(--ink3); text-align:center; padding:4px;
+  background:repeating-linear-gradient(135deg, var(--sunk, #f3f5f8) 0 6px, #fff 6px 12px); }
+.loa-ed-status { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; font-size:12.5px; }
+.loa-ed-status .loa-ic { margin-right:6px; }
+.loa-ic.spin { animation:loa-spin 1s linear infinite; }
+@keyframes loa-spin { to { transform:rotate(360deg); } }
+.loa-ed-count { font-family:var(--f-mono, ui-monospace, monospace); font-size:12px; color:var(--ink2); white-space:nowrap; }
+.loa-ed-why { font-size:12px; line-height:15px; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
+div[data-testid="stDialog"]:has(.loa-deck-ed) [class*="st-key-deck_bar"] { flex-wrap:nowrap; }
+div[data-testid="stDialog"]:has(.loa-deck-ed) [class*="st-key-deck_bar"] .stButton button { width:30px; height:30px; min-height:30px; padding:0; }
+div[data-testid="stDialog"]:has(.loa-deck-ed) [class*="st-key-deck_top"] .stButton button, div[data-testid="stDialog"]:has(.loa-deck-ed) [class*="st-key-deck_top"] .stDownloadButton button { min-height:32px; height:32px; padding:0 10px; white-space:nowrap; }
+div[data-testid="stDialog"]:has(.loa-deck-ed) [class*="st-key-deck_top"] [data-testid="stSegmentedControl"] button { min-height:28px; font-size:12px; }
+div[data-testid="stDialog"]:has(.loa-deck-ed) .stElementContainer:has(> .stChatInput) { bottom:-20px; }
+@media (max-width:860px) { div[data-testid="stDialog"]:has(.loa-deck-ed) .st-key-deck_thumbs { max-height:none; } div[data-testid="stDialog"]:has(.loa-deck-ed) .st-key-deck_thread { max-height:42vh; } }
 </style>
 """)
 st.html(f"<style>{icons_css()}</style>")  # the icons themselves (CSS masks: st.html strips inline <svg>)
@@ -1524,40 +1565,408 @@ def cached_deck(fmt: str, theme: str) -> dict | None:
     return hit
 
 
-def build_deck_now(fmt, theme):
-    """The Copilot plans the deck from this week's data; without it the rule planner picks from the same stories.
-    The .pptx, its PDF and one image per slide are kept under data/exports/decks/<fingerprint>/ and remembered
-    against the data fingerprint, so the same data never builds twice. Returns (how, note)."""
-    fp = deck_fingerprint(fmt, theme)
-    built, how, note = None, "", ""
-    if engine.ready:
-        with st.spinner("The Copilot is reading this week's data and planning the slides…"):
-            try:
-                built, ans = engine.build_deck(fmt, theme, user)
-                how, note = "copilot", ans.text
-            except AgentUnavailable as e:
-                note = str(e)
-    if not built:  # fallback: the rule-based planner, still this week's stories, no model
-        with st.spinner("Building the slides from this week's data…"):
-            out = app.call("build_brief_pptx", {"format": fmt, "theme": theme}, user)
-        built, how = out["data"] if out["data"].get("path") else None, "rules"
-        if not built:
-            st.warning(out["summary"])
-            return "", ""
-    folder = app.root / "data" / "exports" / "decks" / fp
+def store_deck(fmt, theme, built, how, note, shown, edits=None):
+    """Remember a built deck (its spec, slides, PDF and page images) against the data fingerprint."""
+    fp = deck_fingerprint(fmt, built["theme"])
+    pptx = app.root / "data" / "exports" / "decks" / fp / f"london-office-team-brief-{fmt}-{built['theme']}.pptx"
+    data = {"theme": built["theme"], "format": fmt, "how": how, "note": note if how == "rules" and note else "",
+            "slides": [f"{s['title']}" + (f" — {w}" if w else "") for s, w in zip(built["slides"], built.get("why") or [])],
+            "titles": [s["title"] for s in built["slides"]], "layouts": [s["layout"] for s in built["slides"]],
+            "problems": built.get("problems") or [], "spec": built.get("spec"), "edits": edits or [],
+            "pdf": shown["pdf"], "pages": shown["pages"], "preview_note": shown["why"]}
+    app.store.save_cached("deck", fp, data, str(pptx))
+    return fp
+
+
+def deck_folder(fmt, built) -> Path:
+    """The deck's own folder under data/exports/decks/<fingerprint>/, with the .pptx copied in."""
+    folder = app.root / "data" / "exports" / "decks" / deck_fingerprint(fmt, built["theme"])
     folder.mkdir(parents=True, exist_ok=True)
     pptx = folder / f"london-office-team-brief-{fmt}-{built['theme']}.pptx"
     pptx.write_bytes(Path(built["path"]).read_bytes())
-    with st.spinner("Rendering the slide preview…"):
-        shown = _preview.render(pptx, folder)
-    data = {"theme": built["theme"], "format": fmt, "how": how, "note": note if how == "rules" and note else "",
-            "slides": [f"{s['title']}" + (f" — {w}" if w else "") for s, w in zip(built["slides"], built.get("why") or [])],
-            "titles": [s["title"] for s in built["slides"]], "problems": built.get("problems") or [],
-            "pdf": shown["pdf"], "pages": shown["pages"], "preview_note": shown["why"]}
-    app.store.save_cached("deck", fp, data, str(pptx))
+    return pptx
+
+
+class EditorUI:
+    """Where a build or an edit shows itself inside the slide editor: the header's status text, the thumbnail
+    slots (planned first, then each rendered page), the stage, and the Copilot's words in the chat column.
+    Outside the editor the plain st.status is all there is."""
+
+    def __init__(self, head_ph=None, thumbs_ph=None, stage_ph=None, words_ph=None, status=None):
+        self.head_ph, self.thumbs_ph, self.stage_ph, self.words_ph = head_ph, thumbs_ph, stage_ph, words_ph
+        self.status = status or st.status("Planning the slides…", expanded=False)
+        self.slots = []
+
+    def say(self, label):
+        self.status.update(label=label)
+        if self.head_ph is not None:
+            self.head_ph.html(f'<div class="loa-muted loa-ed-status">{ic("loader-circle", 13, "spin")}{esc(label)}</div>')
+
+    def tool(self, name):
+        self.say(f"Working: {TOOL_WORDS.get(name, name.replace('_', ' '))}…")
+        self.status.write(f"→ {name}")
+
+    def words(self, text):
+        if self.words_ph is not None:
+            self.words_ph.markdown(text)
+
+    def plan(self, titles, layouts):
+        """The storyline is known: every slide gets a hatched 'Planned' frame before it is laid out."""
+        self.slots = []
+        if self.thumbs_ph is None:
+            return
+        box = self.thumbs_ph.container()
+        with box:
+            for n, (t, lay) in enumerate(zip(titles, layouts), 1):
+                slot = st.empty()
+                slot.html(f'<div class="loa-ed-planned"><span class="loa-ed-num">{n}</span><div class="loa-ed-frame">'
+                          f'Planned: {esc(lay)}</div><div class="loa-ed-lay">{esc(t)}</div></div>')
+                self.slots.append(slot)
+
+    def page(self, n, total, path, title, layout):
+        self.say(f"Laying out slide {n} of {total}: {layout or title}")
+        if n - 1 < len(self.slots):
+            with self.slots[n - 1].container():
+                st.html(f'<div class="loa-ed-num">{n}</div>')
+                st.image(path, width="stretch")
+                st.html(f'<div class="loa-ed-lay">{esc(layout)}</div>')
+        if self.stage_ph is not None:
+            self.stage_ph.image(path, width="stretch")
+
+    def done(self, label, state="complete"):
+        self.status.update(label=label, state=state)
+        if self.head_ph is not None:
+            self.head_ph.html(f'<div class="loa-muted loa-ed-status">{esc(label)}</div>')
+
+
+def paint_pages(pptx, folder, built, ui: EditorUI, on_page=None) -> dict:
+    """The PDF, then one image per slide, each shown the moment it is laid out."""
+    titles = [s["title"] for s in built["slides"]]
+    layouts = [s["layout"] for s in built["slides"]]
+    ui.plan(titles, layouts)
+    ui.say("Rendering the deck to PDF…")
+    pdf, why = _preview.render_pdf(pptx, folder)
+    pages = []
+    if pdf:
+        total = _preview.page_count(pdf)
+        for n in range(1, total + 1):
+            p = _preview.render_page(pdf, n, folder)
+            if not p:
+                break
+            pages.append(p)
+            ui.page(n, total, p, titles[n - 1] if n - 1 < len(titles) else "", layouts[n - 1] if n - 1 < len(layouts) else "")
+            if on_page:
+                on_page({"pdf": pdf, "pages": list(pages), "why": ""})
+    return {"pdf": pdf, "pages": pages, "why": why or ("" if pages else "page images need poppler (pdftoppm)")}
+
+
+def build_deck_now(fmt, theme, ui: EditorUI | None = None):
+    """The Copilot plans the deck from this week's data; without it the rule planner picks from the same stories.
+    The .pptx, its PDF and one image per slide are kept under data/exports/decks/<fingerprint>/ and remembered
+    against the data fingerprint, so the same data never builds twice. In the slide editor `ui` shows the
+    Copilot's reasoning and each slide as it is laid out. Returns (how, note)."""
+    ui = ui or EditorUI()
+    built, how, note, text = None, "", "", ""
+    if engine.ready:
+        ui.say("The Copilot is reading this week's data and planning the slides…")
+        try:
+            stream = engine.build_deck_streaming(fmt, theme, user, f"deck-{deck_fingerprint(fmt, theme)}")
+            for e in stream.events():
+                if e["event"] == "tool":
+                    ui.tool(e["name"])
+                elif e["event"] == "delta":
+                    text += e["text"]
+                    ui.words(text)
+            if stream.error:
+                raise stream.error
+            built, how, note = engine.built_deck(stream.answer), "copilot", stream.answer.text
+        except AgentUnavailable as e:
+            note = str(e)
+        except Exception as e:  # noqa: BLE001  (the rule planner still gives a deck)
+            note = f"The Copilot could not finish ({str(e)[-160:]})."
+    if not built:  # fallback: the rule-based planner, still this week's stories, no model
+        ui.say("Picking the slides by rules from this week's data…")
+        out = app.call("build_brief_pptx", {"format": fmt, "theme": theme}, user)
+        built, how = out["data"] if out["data"].get("path") else None, "rules"
+        if not built:
+            ui.done("Not built", "error")
+            st.warning(out["summary"])
+            return "", ""
+    pptx = deck_folder(fmt, built)
+    store_deck(fmt, theme, built, how, note, {"pdf": "", "pages": [], "why": "rendering"})  # a Stop keeps what is built
+    shown = paint_pages(pptx, pptx.parent, built, ui, lambda sh: store_deck(fmt, theme, built, how, note, sh))
+    store_deck(fmt, theme, built, how, note, shown)
+    ui.done(f"{len(built['slides'])} slides · storyline {'chosen by the Copilot' if how == 'copilot' else 'picked by rules'} "
+            "from this week's data")
     app.store.log("brief", user, f"built the team brief slides ({fx.BRIEF_FORMATS[fmt].lower()}, {built['theme']}, "
                                  f"{'storyline by the Copilot' if how == 'copilot' else 'rule-picked storyline'})")
     return how, note
+
+
+# ---------------------------------------------------------------- slide editor (a floating window)
+EDIT_PILLS_ON = ["Make slide 2's title shorter", "Add a slide on investment", "Swap slides 2 and 3", "Remove the deals slide"]
+EDIT_PILLS_OFF = ["Remove slide 3", "Add a slide on rents", "Move slide 3 to 2", "Theme forest"]
+THEME_SHORT = {"navy-gold": "Navy gold", "editorial-cream": "Editorial", "data-white": "Data white",
+               "charcoal-amber": "Charcoal", "forest-cream": "Forest"}
+
+
+def open_deck_editor(fmt, theme, build=False, sel=1):
+    """Marks the editor open; deck_panel shows it at the end of the run, and it stays open across reruns until
+    closed or dismissed."""
+    old = st.session_state.get("deck_ed") or {}
+    same = old.get("fmt") == fmt and old.get("theme") == theme
+    st.session_state["deck_ed"] = {"fmt": fmt, "theme": theme, "build": build, "sel": sel, "pending": None,
+                                   "open": True, "chat": old.get("chat", []) if same and not build else []}
+
+
+def _close_editor():
+    if st.session_state.get("deck_ed"):
+        st.session_state["deck_ed"]["open"] = False
+
+
+def _ed_rerun():
+    """Inside the editor: a fragment rerun when the dialog is running as one, else the whole page (the editor
+    reopens from its state)."""
+    try:
+        st.rerun(scope="fragment")
+    except Exception:  # noqa: BLE001  (the dialog's first run belongs to the page)
+        st.rerun()
+
+
+def _deck_pick(key):
+    v = st.session_state.get(key)
+    st.session_state[key] = None
+    if v:
+        ed = st.session_state["deck_ed"]
+        ed["pending"] = (v, False)
+        ed["chat"].append({"role": "user", "content": v})
+
+
+def _deck_theme_pick():
+    ed = st.session_state["deck_ed"]
+    v = st.session_state.get("ed_theme")
+    if v and v != ed["theme"]:
+        ed.update(theme=v, sel=1, chat=[], pending=None, build=not cached_deck(ed["fmt"], v))
+        st.session_state["deck_theme_want"] = (ed["fmt"], v)
+
+
+def edit_deck(ed, hit, instruction, via_rules, ui: EditorUI) -> str:
+    """One instruction from the editor's chat (or a stage button): the Copilot revises the spec and builds
+    again; plain commands and the buttons go through the rule editor, which also stands in when the Copilot is
+    offline. The pages are repainted one by one. Returns the reply."""
+    fmt, theme = ed["fmt"], ed["theme"]
+    d = hit["data"]
+    spec = d.get("spec")
+    if not spec:
+        return "This deck was built before the editor existed, so I have no spec to change. Press Build again first."
+    built, text, reply = None, "", ""
+    if engine.ready and not via_rules:
+        ui.say("The Copilot is revising the slides…")
+        try:
+            stream = engine.edit_deck_streaming(fmt, theme, spec, instruction, user, ed.get("conv"))
+            for e in stream.events():
+                if e["event"] == "tool":
+                    ui.tool(e["name"])
+                elif e["event"] == "delta":
+                    text += e["text"]
+                    ui.words(text)
+            if stream.error:
+                raise stream.error
+            built, reply = engine.built_deck(stream.answer), stream.answer.text
+            if not built:
+                ui.done("Nothing changed")
+                return reply or "The Copilot made no change."
+        except AgentUnavailable as e:
+            ui.done("Copilot unavailable", "error")
+            return str(e)
+        except Exception as e:  # noqa: BLE001
+            ui.done("Copilot failed", "error")
+            return f"The Copilot could not finish ({str(e)[-160:]})."
+    else:
+        stories = _bd.deck_data(app.ctx, fmt).get("stories") or []
+        new, reply = _de.apply(instruction, spec, stories)
+        if not new:
+            ui.done("No change")
+            return reply
+        ui.say("Building the slides again…")
+        out = app.call("build_brief_pptx", {"format": fmt, "theme": new["theme"], "spec": new}, user)
+        built = out["data"] if out["data"].get("path") else None
+        if not built:
+            ui.done("Not built", "error")
+            return f"Not built: {out['data'].get('error') or out['summary']}"
+    pptx = deck_folder(fmt, built)
+    edits = (d.get("edits") or []) + [instruction]
+    how, note = d.get("how", "rules"), d.get("note", "")
+    shown = paint_pages(pptx, pptx.parent, built, ui, lambda sh: store_deck(fmt, theme, built, how, note, sh, edits))
+    store_deck(fmt, theme, built, how, note, shown, edits)
+    if built["theme"] != theme:  # the theme changed: the deck now lives under that theme
+        app.store.forget_cached("deck", deck_fingerprint(fmt, theme))
+        ed["theme"] = built["theme"]
+        st.session_state["deck_theme_want"] = (fmt, built["theme"])
+    ed["sel"] = min(ed.get("sel") or 1, len(built["slides"]))
+    ui.done(f"{len(built['slides'])} slides · edited {len(edits)} time{'s' if len(edits) != 1 else ''} in the editor")
+    app.store.log("brief", user, f"edited the team brief slides: {instruction[:80]}")
+    if built.get("problems"):
+        reply += "\n\nThe check flagged: " + "; ".join(built["problems"])
+    return reply
+
+
+def _ed_ask(instruction, sel=None):
+    ed = st.session_state["deck_ed"]
+    ed["pending"] = (instruction, True)
+    ed["chat"].append({"role": "user", "content": instruction})
+    if sel:
+        ed["sel"] = sel
+    _ed_rerun()
+
+
+@st.dialog("Slides", width="large", on_dismiss=_close_editor)
+def deck_editor():
+    """The slides as a floating window laid out like a presentation app: thumbnails with page numbers on the
+    left, the chosen slide large in the middle, and the Copilot on the right to change the deck by conversation.
+    Build slides opens it too: the Copilot's planning streams into the chat column, every slide first appears as
+    'Planned', and each thumbnail fills in as that slide is laid out."""
+    ed = st.session_state.get("deck_ed") or {}
+    fmt, theme = ed.get("fmt", "board"), ed.get("theme", "navy-gold")
+    st.html('<span class="loa-deck-ed"></span>')
+    building, pending = bool(ed.get("build")), ed.get("pending")
+    hit = None if building else cached_deck(fmt, theme)
+    d = (hit or {}).get("data") or {}
+    titles, layouts = d.get("titles") or [], d.get("layouts") or []
+    pages = [q for q in d.get("pages") or [] if Path(q).exists()]
+    n = len(pages)
+    sel = min(max(ed.get("sel") or 1, 1), max(n, 1))
+    # header: name, theme, status, Stop / Build again + Download, close
+    with st.container(key="deck_top", horizontal=True, vertical_alignment="center", gap="small"):
+        st.html(f'<div class="loa-cp-title">{ic("presentation", 18, "accent")}Slides <small>{esc(fx.BRIEF_FORMATS[fmt])}</small></div>',
+                width="content")
+        st.segmented_control("Theme", list(THEME_SHORT), format_func=THEME_SHORT.get, key="ed_theme",
+                             default=theme, label_visibility="collapsed", on_change=_deck_theme_pick,
+                             disabled=building or bool(pending), width="content")
+        head_ph = st.empty()
+        if not building and not pending:
+            edits = len(d.get("edits") or [])
+            head_ph.html(f'<div class="loa-muted loa-ed-status">{n} slides · storyline '
+                         f'{"chosen by the Copilot" if d.get("how") == "copilot" else "picked by rules"} from this week\'s data'
+                         + (f' · edited {edits} time{"s" if edits != 1 else ""}' if edits else "") + "</div>"
+                         if hit else '<div class="loa-muted loa-ed-status">Not built yet</div>')
+        if building:
+            if st.button("Stop", icon=material("square"), key="ed_stop", width="content", help="Keep what is built so far"):
+                ed["build"] = False
+                _ed_rerun()
+        else:
+            if st.button("Build again", icon=material("refresh-cw"), key="ed_rebuild", width="content",
+                         help="Plan the deck again from this week's data", disabled=bool(pending)):
+                ed.update(build=True, chat=[], pending=None, sel=1)
+                _ed_rerun()
+            if hit:
+                st.download_button("Download .pptx", Path(hit["path"]).read_bytes(), file_name=Path(hit["path"]).name,
+                                   mime="application/vnd.openxmlformats-officedocument.presentationml.presentation",
+                                   key="ed_dl_pptx", type="primary", icon=material("download"), width="content")
+                if d.get("pdf") and Path(d["pdf"]).exists():
+                    st.download_button("PDF", Path(d["pdf"]).read_bytes(), file_name=Path(hit["path"]).stem + ".pdf",
+                                       mime="application/pdf", key="ed_dl_pdf", width="content")
+        if st.button("", icon=material("x"), key="ed_close", help="Close · Esc", width="content"):
+            _close_editor()
+            st.rerun()
+    cols = st.columns([1.05, 3.2, 1.95], gap="medium")
+    with cols[0]:
+        with st.container(key="deck_thumbs"):
+            thumbs_ph = st.empty()
+    with cols[1]:
+        with st.container(key="deck_stage"):
+            stage_ph = st.empty()
+            bar_ph = st.empty()
+    with cols[2]:
+        with st.container(key="deck_chat"):
+            thread = st.container(key="deck_thread")
+            ask_ph = st.empty()
+    if not building:
+        with thumbs_ph.container():
+            if not pages:
+                st.caption("No slide images yet" + (f" ({d.get('preview_note')})" if d.get("preview_note") and hit else ""))
+            for i, q in enumerate(pages, 1):
+                with st.container(key=f"ed_th_{i}_{'on' if i == sel else 'off'}"):
+                    st.html(f'<div class="loa-ed-num">{i}</div>')
+                    st.image(q, width="stretch")
+                    if st.button(layouts[i - 1] if i - 1 < len(layouts) else f"Slide {i}", key=f"ed_pick_{i}",
+                                 type="tertiary", width="stretch", help=titles[i - 1] if i - 1 < len(titles) else None):
+                        ed["sel"] = i
+                        _ed_rerun()
+        if pages:
+            stage_ph.image(pages[sel - 1], width="stretch")
+            spec_slides = (d.get("spec") or {}).get("slides") or []
+            why = spec_slides[sel - 1].get("why", "") if sel - 1 < len(spec_slides) else ""
+            locked = sel == 1 or (sel == n and sel - 1 < len(layouts) and layouts[sel - 1] == "Sources")
+            with bar_ph.container(key="deck_bar", horizontal=True, vertical_alignment="center", gap="small"):
+                if st.button("", icon=material("chevron-left"), key="ed_prev", disabled=sel <= 1, width="content", help="Previous"):
+                    ed["sel"] = sel - 1
+                    _ed_rerun()
+                if st.button("", icon=material("chevron-right"), key="ed_next", disabled=sel >= n, width="content", help="Next"):
+                    ed["sel"] = sel + 1
+                    _ed_rerun()
+                st.html(f'<div class="loa-ed-count">{sel} / {n}</div>'
+                        f'<div class="loa-muted loa-ed-why">{esc(titles[sel - 1] if sel - 1 < len(titles) else "")}'
+                        + (f' · <i>Why this slide: {esc(why)}</i>' if why else "") + "</div>", width="stretch")
+                busy = bool(pending)
+                if st.button("", icon=material("arrow-up"), key="ed_up", width="content", help="Move up",
+                             disabled=busy or locked or sel <= 2):
+                    _ed_ask(f"move slide {sel} up", sel - 1)
+                if st.button("", icon=material("arrow-down"), key="ed_down", width="content", help="Move down",
+                             disabled=busy or locked or sel >= n - 1):
+                    _ed_ask(f"move slide {sel} down", sel + 1)
+                if st.button("", icon=material("trash-2"), key="ed_rm", width="content", help="Remove this slide",
+                             disabled=busy or locked or n <= 3):
+                    _ed_ask(f"remove slide {sel}", max(sel - 1, 1))
+        elif hit:
+            with stage_ph.container():
+                for line in d.get("slides") or []:
+                    st.markdown(f"- {line}")
+    # the chat column: what was said so far, then the empty state or the instruction being carried out
+    with thread:
+        if not ed.get("chat") and not building:
+            st.html('<div class="loa-cp-hello" style="font-size:18px">Change the deck by asking.</div>'
+                    '<div class="loa-cp-sub">Retitle a slide, add or remove one, change the order or the theme. '
+                    + ("The Copilot revises the storyline and builds again; every figure stays checked against the data."
+                       if engine.ready else "The Copilot is offline, so plain commands are applied by rules.") + "</div>")
+            st.pills("Suggestions", EDIT_PILLS_ON if engine.ready else EDIT_PILLS_OFF, key="ed_pills",
+                     label_visibility="collapsed", on_change=_deck_pick, args=("ed_pills",))
+        for turn in ed.get("chat") or []:
+            with st.chat_message(turn["role"]):
+                st.markdown(turn["content"])
+        if building:
+            with st.chat_message("assistant"):
+                st.markdown("Building the deck…")
+                status = st.status("Planning the slides…", expanded=True)
+                words_ph = st.empty()
+            ed["conv"] = f"deck-{deck_fingerprint(fmt, theme)}"
+            ui = EditorUI(head_ph, thumbs_ph, stage_ph, words_ph, status)
+            how, note = build_deck_now(fmt, theme, ui)
+            ed["build"] = False
+            hit = cached_deck(fmt, theme)
+            if hit:
+                label, plain = DECK_MSG[how]
+                ed["chat"] = [{"role": "assistant", "content": f"**{label}.** {plain}\n\n"
+                               + ("\n".join(f"{i}. {line}" for i, line in enumerate(hit["data"].get("slides") or [], 1)))
+                               + ("\n\n" + note if how == "copilot" and note else "")}]
+            ed["sel"] = 1
+            _ed_rerun()
+        elif pending:
+            ed["pending"] = None
+            instruction, via_rules = pending
+            with st.chat_message("assistant"):
+                status = st.status("Working…", expanded=True)
+                words_ph = st.empty()
+                ui = EditorUI(head_ph, thumbs_ph, stage_ph, words_ph, status)
+                reply = edit_deck(ed, hit, instruction, via_rules, ui) if hit else "Build the slides first."
+            ed["chat"].append({"role": "assistant", "content": reply})
+            _ed_rerun()
+    components.html(f"<script>/*{len(ed.get('chat') or [])}-{datetime.now().timestamp()}*/"
+                    "const t=parent.document.querySelector('.st-key-deck_thread'); if (t) t.scrollTop=1e6;</script>", height=0)
+    if (q := ask_ph.chat_input("Change this deck…", key="ed_chat_in", disabled=building or bool(pending))):
+        ed["chat"].append({"role": "user", "content": q})
+        ed["pending"] = (q, False)
+        _ed_rerun()
 
 
 def deck_panel(fmt):
@@ -1568,6 +1977,8 @@ def deck_panel(fmt):
         st.markdown("**Slides**  ·  " + ("the Copilot reads this week's data and picks the slides, layouts and titles"
                                         if engine.ready else "picked by rules from this week's data (Copilot offline)"))
         c = st.columns([2.6, 1.3, 1.3, 1.0, 1.4], vertical_alignment="bottom")
+        if (w := st.session_state.pop("deck_theme_want", None)) and w[0] == fmt:
+            st.session_state[f"deck_theme_{fmt}"] = w[1]  # the editor changed the theme: follow it
         theme = c[0].selectbox("Slide theme", list(DECK_THEMES), format_func=DECK_THEMES.get, key=f"deck_theme_{fmt}",
                                index=list(DECK_THEMES).index("data-white" if fmt == "ic" else "navy-gold"),
                                help="Each format remembers its own theme. IC packs default to Data white.")
@@ -1575,14 +1986,15 @@ def deck_panel(fmt):
         if c[1].button("Build again" if hit else "Build slides", key=f"mk_deck_{fmt}", width="stretch",
                        type="secondary" if hit else "primary", icon=material("refresh-cw") if hit else None,
                        help=("The slides for this data are already built; this plans them again" if hit else
-                             "Plans a 3-6 slide deck from this week's data; takes a few seconds")):
-            build_deck_now(fmt, theme)
-            hit = cached_deck(fmt, theme)
+                             "Plans a 3-6 slide deck from this week's data; you watch each slide being laid out")):
+            open_deck_editor(fmt, theme, build=True)
         if not hit:
             c[4].caption("Five house themes, 13 layouts, every number footnoted and checked against the data. For a "
                          "deck this button does not give you, ask Copilot: \"a client update on the forest theme that "
                          "only covers Midtown\".")
             st.html(theme_swatches())
+            if (st.session_state.get("deck_ed") or {}).get("open"):
+                deck_editor()
             return
         d = hit["data"]
         c[2].download_button("Download .pptx", Path(hit["path"]).read_bytes(), file_name=Path(hit["path"]).name,
@@ -1591,15 +2003,24 @@ def deck_panel(fmt):
         if d.get("pdf") and Path(d["pdf"]).exists():
             c[3].download_button("PDF", Path(d["pdf"]).read_bytes(), file_name=Path(hit["path"]).stem + ".pdf",
                                  mime="application/pdf", key=f"dl_pdf_{fmt}_{theme}", width="stretch")
+        if c[4].button("Open editor", key=f"ed_open_{fmt}", width="stretch", icon=material("message-square"),
+                       help="Thumbnails, a big preview and a chat to change the slides"):
+            open_deck_editor(fmt, theme)
         label, plain = DECK_MSG[d["how"]]
+        edits = len(d.get("edits") or [])
         st.html(f'<div class="loa-muted" style="margin:4px 0 8px 0">{chip(label, "ok" if d["how"] == "copilot" else "warn")}'
                 f'Built {esc(when(hit["ts"]))} · the data has not changed since'
+                + (f' · edited {edits} time{"s" if edits != 1 else ""} in the editor' if edits else "")
                 + (f' · {esc(d["note"])}' if d.get("note") else "") + "</div>")
         pages = [q for q in d.get("pages") or [] if Path(q).exists()]
         if pages:
             cols = st.columns(3)
             for i, (q, title) in enumerate(zip(pages, d.get("titles") or [""] * len(pages))):
-                cols[i % 3].image(q, caption=f"{i + 1} · {title}" if title else str(i + 1), width="stretch")
+                with cols[i % 3]:
+                    st.image(q, width="stretch")
+                    if st.button(f"{i + 1} · {title}" if title else str(i + 1), key=f"pg_{fmt}_{theme}_{i}",
+                                 type="tertiary", width="stretch", help="Open this slide in the editor"):
+                        open_deck_editor(fmt, theme, sel=i + 1)
         else:
             st.caption("No slide images on this server (" + (d.get("preview_note") or "preview not rendered")
                        + "); the outline:")
@@ -1613,6 +2034,8 @@ def deck_panel(fmt):
         for q in d.get("problems") or []:
             row[1].html(f'<div class="loa-muted">{ic("triangle-alert", 13, "flag")}{esc(q)}</div>')
         st.html(theme_swatches())
+    if (st.session_state.get("deck_ed") or {}).get("open"):
+        deck_editor()
 
 
 def brief_page():

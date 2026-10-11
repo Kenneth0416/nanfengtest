@@ -237,7 +237,7 @@ def build_brief_pptx(ctx, args):
                    "\n- ".join(problems)
     return {"summary": summary,
             "data": {"path": str(path), "theme": built["theme"], "slides": slides, "refused": [],
-                     "problems": problems, "format": fmt, "storyline": storyline,
+                     "problems": problems, "format": fmt, "storyline": storyline, "spec": spec,
                      "why": [s.get("why", "") for s in spec["slides"]]}}
 
 

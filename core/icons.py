@@ -57,6 +57,9 @@ PATHS = {
     'user': '<path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/>',
     'users': '<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><path d="M16 3.128a4 4 0 0 1 0 7.744"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><circle cx="9" cy="7" r="4"/>',
     'wrench': '<path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.106-3.105c.32-.322.863-.22.983.218a6 6 0 0 1-8.259 7.057l-7.91 7.91a1 1 0 0 1-2.999-3l7.91-7.91a6 6 0 0 1 7.057-8.259c.438.12.54.662.219.984z"/>',
+    'loader-circle': '<path d="M21 12a9 9 0 1 1-6.219-8.56"/>',
+    'chevron-left': '<path d="m15 18-6-6 6-6"/>',
+    'trash-2': '<path d="M10 11v6"/><path d="M14 11v6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M3 6h18"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>',
     'x': '<path d="M18 6 6 18"/><path d="m6 6 12 12"/>',
 }
 
@@ -109,7 +112,8 @@ MATERIAL = {"activity": ":material/monitoring:", "message-square": ":material/ch
             "sparkles": ":material/auto_awesome:", "history": ":material/history:", "x": ":material/close:",
             "download": ":material/download:", "send": ":material/send:", "eye": ":material/visibility:",
             "presentation": ":material/co_present:", "upload": ":material/upload:", "wrench": ":material/build:",
-            "circle-x": ":material/cancel:", "chevron-down": ":material/expand_more:", "share-2": ":material/share:", "eye-off": ":material/visibility_off:", "user": ":material/person:", "link-off": ":material/link_off:", "circle-check": ":material/check_circle:", "info": ":material/info:", "copy": ":material/content_copy:", "clock": ":material/schedule:"}
+            "circle-x": ":material/cancel:", "chevron-down": ":material/expand_more:", "share-2": ":material/share:", "eye-off": ":material/visibility_off:", "user": ":material/person:", "link-off": ":material/link_off:", "circle-check": ":material/check_circle:", "info": ":material/info:", "copy": ":material/content_copy:", "clock": ":material/schedule:", "chevron-left": ":material/chevron_left:",
+            "chevron-right": ":material/chevron_right:", "arrow-up": ":material/arrow_upward:", "trash-2": ":material/delete:"}
 
 
 def material(name: str) -> str | None:
