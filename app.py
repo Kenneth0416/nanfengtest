@@ -118,6 +118,12 @@ a.loa-chip { text-decoration:none; }
 .loa-team b { color:var(--ink); font-size:14px; }
 .loa-brand { display:flex; align-items:center; gap:8px; font-size:17px; font-weight:700; color:var(--ink); margin:4px 0 2px 0; }
 .loa-brand .loa-ic { margin:0; color:var(--accent); }
+/* Copilot floating button: bottom right of every page, above the content; gone while the panel is open */
+.st-key-fab_copilot { position:fixed; right:28px; bottom:28px; z-index:1001; width:auto !important; }
+.st-key-fab_copilot button { width:54px; height:54px; min-height:54px; border-radius:50%; padding:0;
+  box-shadow:0 4px 16px rgba(15,26,42,.30); }
+.st-key-fab_copilot button [data-testid="stIconMaterial"] { font-size:26px; }
+body:has(div[data-testid="stDialog"]) .st-key-fab_copilot { display:none; }
 /* Copilot side panel: the input box stays at the bottom of the panel while the conversation scrolls above it */
 div[data-testid="stDialog"] section > div { display:flex; flex-direction:column; }
 div[data-testid="stDialog"] section > div > div[data-testid="stVerticalBlock"],
@@ -315,7 +321,18 @@ def goto(key: str, **state):
     st.switch_page(PAGE_OBJ[key])
 
 
+def copilot_fab():
+    """The Copilot's floating button: fixed at the bottom right of every page except the Copilot page itself, so
+    a question is one click away wherever the reader is. Hidden while the side panel is open (its own X
+    closes it). The stylesheet positions it by the element's key class (st-key-fab_copilot)."""
+    if st.button("", icon=material("message-square"), key="fab_copilot", type="primary",
+                 help="Ask Copilot · Ctrl+K or /"):
+        open_copilot()
+
+
 def page_header(title: str, subtitle: str, extra: tuple | None = None):
+    copilot_fab()
+    follow_output()  # the page-level keyboard shortcut ("/") and follow-scrolling need the script on every page
     c = st.columns([4, 1.6, 1.5] if extra else [4.5, 1.5], vertical_alignment="center")
     c[0].html(f'<div class="loa-h1">{esc(title)}</div><div class="loa-sub">{esc(subtitle)}</div>')
     if extra:
@@ -435,9 +452,10 @@ FOLLOW_CORE = r"""(function () {
     const t = e.target;
     if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)) { return; }
     const boxes = doc.querySelectorAll("textarea[data-testid='stChatInputTextArea']");
-    if (!boxes.length) { return; }
     e.preventDefault();
-    boxes[boxes.length - 1].focus();
+    if (boxes.length) { boxes[boxes.length - 1].focus(); return; }
+    const fab = doc.querySelector(".st-key-fab_copilot button");
+    if (fab) { fab.click(); }
   });
 })();"""
 
