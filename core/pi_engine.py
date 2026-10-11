@@ -131,22 +131,26 @@ class PiDurableEngine:
         return True, "ready"
 
     def _run(self, script: str, stdin: str, role: str, request_id: str | None, on_event=None,
-             conversation: str | None = None, mode: str = "") -> tuple[dict, str]:
+             conversation: str | None = None, mode: str = "", token: dict | None = None) -> tuple[dict, str]:
         """One request through Pi, serialised per person. A store error resets that person's store once and
         runs again; the answer then comes from a fresh conversation (the person is told in the engine note).
         `on_event` receives each progress line ({"event": "delta"|"tool"|"tool_end"|"message_end", ...}) as it
         arrives, so the web app can stream the answer."""
         lock = self._lock(role)
-        if not lock.acquire(timeout=float(os.getenv("PI_WAIT", "12"))):
-            # The person's earlier question is still running (they stopped it, asked again, or reloaded the page)
-            # and would hold the lock until it finished, up to the full timeout: stop it, this question comes first.
-            self.cancel(role)
+        if not lock.acquire(timeout=float(os.getenv("PI_WAIT", "3"))):
+            # The person's earlier request (a question, a deck being built) is still running in the background:
+            # this one waits its turn and the page says so. Stop on this one abandons the wait.
             if on_event:
-                on_event({"event": "cancelled_previous"})
-            lock.acquire()
+                on_event({"event": "waiting", "what": (self._running.get(role) or {}).get("what", "")})
+            while not lock.acquire(timeout=1):
+                if token and token.get("cancelled"):
+                    raise AgentCancelled("stopped while waiting")
+        if token and token.get("cancelled"):
+            lock.release()
+            raise AgentCancelled("stopped while waiting")
         try:
             try:
-                return self._run_once(script, stdin, role, request_id, on_event, conversation, mode)
+                return self._run_once(script, stdin, role, request_id, on_event, conversation, mode, stdin[:80])
             except RuntimeError as e:
                 if not STORE_ERROR.search(str(e)):
                     raise
@@ -155,7 +159,7 @@ class PiDurableEngine:
                       f"conversation", file=sys.stderr)
                 if on_event:
                     on_event({"event": "reset"})
-                out, rid = self._run_once(script, stdin, role, None, on_event, conversation, mode)
+                out, rid = self._run_once(script, stdin, role, None, on_event, conversation, mode, stdin[:80])
                 out["store_reset"] = True
                 return out, rid
         finally:
@@ -175,7 +179,7 @@ class PiDurableEngine:
         return True
 
     def _run_once(self, script: str, stdin: str, role: str, request_id: str | None, on_event=None,
-                  conversation: str | None = None, mode: str = "") -> tuple[dict, str]:
+                  conversation: str | None = None, mode: str = "", what: str = "") -> tuple[dict, str]:
         if self.bridge is None:
             self.bridge = ToolBridge(self.app)
         rid = request_id or uuid.uuid4().hex
@@ -199,9 +203,11 @@ class PiDurableEngine:
         cmd = ["node", "--experimental-strip-types", "--no-warnings", str(self.dir / script)]
         last_err = ""
         limit = int(os.getenv("PI_TIMEOUT", self.app.config.get("agent", {}).get("timeout_seconds", 1800)))
+        if mode == "deck":  # a deck build or edit that runs past this is stuck, not thinking
+            limit = min(limit, int(os.getenv("PI_DECK_TIMEOUT", "600")))
         for _attempt in range(2):   # a retry with the same request ID resumes, it never re-asks
             try:
-                proc, final, err = self._stream(cmd, stdin, env, limit, on_event, role)
+                proc, final, err = self._stream(cmd, stdin, env, limit, on_event, role, what)
             except AgentCancelled:
                 raise
             except subprocess.TimeoutExpired:  # the durable run keeps its finished steps; one resume
@@ -220,13 +226,13 @@ class PiDurableEngine:
             last_err = (err if len(err) <= 1000 else err[:500] + " … " + err[-500:]) or f"exit code {proc.returncode}, no output"
         raise RuntimeError(f"Pi local run of {script} failed (not the model API): {last_err}")
 
-    def _stream(self, cmd, stdin, env, limit, on_event, role: str = ""):
+    def _stream(self, cmd, stdin, env, limit, on_event, role: str = "", what: str = ""):
         """Run the Node script, hand each progress line to on_event as it is printed, and return
         (process, final JSON line or None, stderr text). Raises TimeoutExpired after `limit` seconds and
         AgentCancelled when cancel(role) killed the run."""
         proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                                 text=True, env=env, cwd=self.dir)
-        run = {"proc": proc, "cancelled": False}
+        run = {"proc": proc, "cancelled": False, "what": what}
         self._running[role] = run
         err_box = {"text": ""}
         reader = threading.Thread(target=lambda: err_box.__setitem__("text", proc.stderr.read()), daemon=True)
@@ -266,11 +272,11 @@ class PiDurableEngine:
         return proc, final, err_box["text"] or "\n".join(out_tail[-20:])
 
     def ask(self, question: str, role: str, request_id: str | None = None, on_event=None,
-            conversation: str | None = None, mode: str = "") -> Answer:
+            conversation: str | None = None, mode: str = "", token: dict | None = None) -> Answer:
         """`conversation` names which of the person's saved chats the question continues (each web chat keeps
         its own Pi conversation, so a new chat starts with a clean context). `mode` "deck" limits the tools to
         reading and building slides."""
-        out, rid = self._run("agent.ts", question, role, request_id, on_event, conversation, mode)
+        out, rid = self._run("agent.ts", question, role, request_id, on_event, conversation, mode, token)
         self.bridge.modes.pop(rid, None)
         return Answer(out.get("answer", ""), self.bridge.pop_trace(rid),
                       f"pi-durable:{out.get('model', '')} (conversation {out.get('conversation', '')})"

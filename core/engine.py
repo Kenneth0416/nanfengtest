@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import json
-import queue
 import re
 import sys
 import threading
@@ -71,35 +70,60 @@ def split_follow_ups(text: str) -> tuple[str, list[str]]:
 
 
 class StreamingAnswer:
-    """A Copilot answer being written: events() yields {"event": "delta", "text": ...} and tool events in order;
-    when the generator finishes, `answer` holds the complete Answer (text, trace, sources) or `error` the failure."""
+    """A Copilot answer being written in its own thread. events() yields {"event": "delta", "text": ...} and tool
+    events in order; when they end, `answer` holds the complete Answer (text, trace, sources) or `error` the
+    failure. Every event is kept, so a reader that was interrupted (the person switched pages, closed the
+    window, the script was rerun) can call events() again and catch up from the first event; the run itself
+    is never interrupted by that, only by cancel()."""
 
     def __init__(self, engine: "Engine", question: str, role: str, conversation: str | None = None, mode: str = ""):
         self.answer: Answer | None = None
         self.error: Exception | None = None
         self.coverage = coverage.note(question, engine.app.store)
-        self._q: queue.Queue = queue.Queue()
+        self.engine, self.role, self.question = engine, role, question
+        self.token = {"cancelled": False}
+        self._log: list[dict] = [{"event": "delta", "text": f"> **Coverage:** {self.coverage}\n\n"}] if self.coverage else []
+        self._cv = threading.Condition()
+        self.done = False
 
-        self.engine, self.role = engine, role
+        def put(e):
+            with self._cv:
+                self._log.append(e)
+                self._cv.notify_all()
 
         def run():
             try:
-                self.answer = engine.ask(question, role, None, self._q.put, conversation, mode)
+                self.answer = engine.ask(question, role, None, put, conversation, mode, self.token)
             except Exception as e:  # noqa: BLE001  (surfaced to the page as .error)
                 self.error = e
             finally:
-                self._q.put(None)
+                with self._cv:
+                    self.done = True
+                    self._cv.notify_all()
         threading.Thread(target=run, daemon=True, name=f"copilot-{role}").start()
 
     def cancel(self) -> bool:
-        """Stop the run behind this answer (the person pressed Stop or moved on), so the next question does not
-        queue behind it."""
+        """Stop the run behind this answer (the person pressed Stop), whether it is running or still waiting
+        for its turn."""
+        self.token["cancelled"] = True
         return self.engine.pi.cancel(self.role)
 
-    def events(self):
-        if self.coverage:
-            yield {"event": "delta", "text": f"> **Coverage:** {self.coverage}\n\n"}
-        while (e := self._q.get()) is not None:
+    def events(self, start: int = 0):
+        """The events from `start` on. While nothing arrives a {"event": "tick"} comes every second, so the page
+        can show the time passing and, more to the point, so Streamlit gets a chance to interrupt the script
+        (a Stop press is only seen at the next page call; a reader blocked on the queue never gave it one)."""
+        i = start
+        while True:
+            with self._cv:
+                if i >= len(self._log) and not self.done:
+                    self._cv.wait(timeout=1.0)
+                if i >= len(self._log):
+                    if self.done:
+                        return
+                    e = {"event": "tick"}
+                else:
+                    e = self._log[i]
+                    i += 1
             yield e
 
     def text(self):
@@ -135,13 +159,13 @@ class Engine:
             raise AgentFailed(_plain(e), str(e)[-600:]) from None
 
     def ask(self, question: str, role: str, history: list[dict] | None = None, on_event=None,
-            conversation: str | None = None, mode: str = "") -> Answer:
+            conversation: str | None = None, mode: str = "", token: dict | None = None) -> Answer:
         """A Copilot question. Pi keeps the conversation itself, so history is not passed; `conversation` names
         which of the person's saved chats this continues (their one default chat when not given).
         `on_event` gets each streamed piece of the answer and each tool start as it happens."""
         gap = coverage.note(question, self.app.store)
         ans = self._run(self.pi.ask, f"{question}\n\n(Coverage note shown to the user: {gap})" if gap else question, role,
-                        None, on_event, conversation, mode)
+                        None, on_event, conversation, mode, token)
         if gap:
             ans.text = f"> **Coverage:** {gap}\n\n{ans.text}"
         return ans

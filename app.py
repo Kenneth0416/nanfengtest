@@ -18,6 +18,7 @@ import hashlib
 import html
 import json
 import re
+import threading
 from datetime import date, datetime, timezone
 from pathlib import Path
 
@@ -948,13 +949,40 @@ def history_list(chat_id, sfx):
         st.caption(f"{when(c['updated'])} · {c['messages']} messages")
 
 
+JOBS: dict[tuple, dict] = {}  # (person, slot) -> the partial of a Copilot run still going; shared by every session
+
+
+def running_job(slot: str = ""):
+    """The partial of this person's run in `slot`, from this session or (after a reload) from the shared table."""
+    p = st.session_state.get("partial")
+    if p and p.get("slot", "") == slot:
+        return p
+    return JOBS.get((chat_owner(), slot))
+
+
 def absorb_partial(chat_id, turns, slot: str = ""):
     """After the reader pressed Stop (or clicked elsewhere) while an answer was streaming: keep what was
     written, marked 'Stopped', in the chat it belonged to. Returns the turns on screen, reloaded if that chat."""
-    if (partial := st.session_state.get("partial")) and partial.get("slot", "") == slot:
-        st.session_state.pop("partial")
-        if partial.get("stream") is not None and hasattr(partial["stream"], "cancel"):
-            partial["stream"].cancel()  # the Node run behind it stops too, so the next question starts at once
+    partial = st.session_state.get("partial")
+    if not (partial and partial.get("slot", "") == slot):
+        partial = JOBS.get((chat_owner(), slot))  # the page was reloaded: the run is still going for this person
+        if partial and partial.get("owner") != chat_owner():
+            partial = None
+    if partial:
+        if st.session_state.get("partial") is partial:
+            st.session_state.pop("partial")
+        JOBS.pop((partial.get("owner"), slot), None)
+        stream = partial.get("stream")
+        if stream is not None and hasattr(stream, "events") and not st.session_state.get(f"stop_{partial['chat']}"):
+            # not a Stop: the page was switched or rerun while the Copilot was working. The run went on in the
+            # background; the thread picks it up again from its first event (or shows the finished answer).
+            st.session_state["resume" + slot] = partial
+            if partial["chat"] != chat_id:
+                open_chat(partial["chat"], slot)
+                return st.session_state["chat_turns" + slot]
+            return turns
+        if stream is not None and hasattr(stream, "cancel"):
+            stream.cancel()  # the Node run behind it stops too, so the next question starts at once
         app.store.add_chat_message(partial["chat"], "user", partial["q"])
         app.store.add_chat_message(partial["chat"], "assistant", (partial["text"].rstrip() or "(nothing written yet)")
                                    + "\n\n*Stopped.*")
@@ -1064,14 +1092,18 @@ def copilot_thread(turns, ctx, question):
                 say("user", question)
                 say("assistant", reply)
         return
+    resume = st.session_state.pop("resume", None)
+    if resume and not question:
+        question, asked, stream = resume["q"], resume.get("asked") or resume["q"], resume["stream"]
+    elif question:
+        asked, stream = (f"{question} (About: {ctx['title']}. {ctx['detail']})" if ctx["kind"] == "signal" else question), None
     if question:
         st.session_state["undo_ready"] = False
         # The signal card travels with the question so the agent knows which market and figure "this" means.
-        asked = f"{question} (About: {ctx['title']}. {ctx['detail']})" if ctx["kind"] == "signal" else question
         with st.chat_message("user"):
             st.markdown(question)
         with st.chat_message("assistant"):
-            ans = stream_answer(asked, ensure_chat(), question)
+            ans = stream_answer(asked, ensure_chat(), question, stream=stream)
             if ans is None:
                 return
             show_answer(ans, text_done=True)
@@ -1088,7 +1120,7 @@ TOOL_WORDS = {"get_signals": "reading this week's signals", "get_metric_trend": 
               "record_deal": "recording the deal", "list_our_deals": "listing our deals", "search_news": "searching the news"}
 
 
-def stream_answer(asked: str, chat_id: str | None = None, question: str = "", stream=None, slot: str = ""):
+def stream_answer(asked: str, chat_id: str | None = None, question: str = "", stream=None, slot: str = "", **extra):
     """Ask the Copilot (continuing the chat `chat_id`) and show the answer as it is written. A Stop button sits
     under the status line while it writes: pressing it keeps what has arrived (marked 'Stopped') and offers
     'Ask again'. A status line names each tool as it starts; the
@@ -1106,10 +1138,17 @@ def stream_answer(asked: str, chat_id: str | None = None, question: str = "", st
     status = st.status("Starting the Copilot…", expanded=False)
     stream = stream or engine.ask_streaming(asked, user, chat_id)
     tools = []
+    label = {"text": "Starting the Copilot…", "since": datetime.now()}
+
+    def show(text):
+        label.update(text=text, since=datetime.now())
+        status.update(label=text)
     stop = st.empty()
     stop.button("", icon=material("square"), key=f"stop_{chat_id}", type="tertiary",
                 help="Stop: keep what has been written so far")
-    st.session_state["partial"] = {"q": question or asked, "chat": chat_id, "text": "", "slot": slot, "stream": stream}
+    st.session_state["partial"] = {"q": question or asked, "chat": chat_id, "text": "", "slot": slot, "stream": stream,
+                                   "asked": asked, "owner": chat_owner(), "ed": dict(st.session_state.get("deck_ed") or {}), **extra}
+    JOBS[(chat_owner(), slot)] = st.session_state["partial"]
     shown = {"text": ""}
 
     held_box = {"text": "", "line_start": True}  # the tail is held back so the closing 'Follow up:' line never shows
@@ -1141,14 +1180,20 @@ def stream_answer(asked: str, chat_id: str | None = None, question: str = "", st
                     yield out
             elif e["event"] == "tool":
                 tools.append(e["name"])
-                status.update(label=f"Working: {TOOL_WORDS.get(e['name'], e['name'].replace('_', ' '))}…")
+                show(f"Working: {TOOL_WORDS.get(e['name'], e['name'].replace('_', ' '))}…")
                 status.write(f"→ {e['name']}")
+            elif e["event"] == "tick":  # nothing for a second: show the time passing (and let a Stop through)
+                secs = int((datetime.now() - label["since"]).total_seconds())
+                if secs >= 5:
+                    status.update(label=f"{label['text']} {secs // 60}m {secs % 60:02d}s" if secs >= 60 else f"{label['text']} {secs}s")
             elif e["event"] == "reset":
                 status.write("Your earlier conversation could not be loaded and was set aside; starting a new one.")
             elif e["event"] == "retry":
                 status.write("Taking longer than expected; resuming from the last checkpoint.")
-            elif e["event"] == "cancelled_previous":
-                status.write("Your earlier question was still running; it was stopped so this one can start.")
+            elif e["event"] == "waiting":
+                show("Waiting for your earlier request to finish…")
+                status.write("Your earlier request" + (f" ({e['what']})" if e.get("what") else "")
+                             + " is still running in the background; this one starts when it is done. Stop abandons the wait.")
     def pieces_then_rest():
         yield from pieces()
         # whatever was held: all of it unless it is the follow-up line (the buttons below take over)
@@ -1156,6 +1201,7 @@ def stream_answer(asked: str, chat_id: str | None = None, question: str = "", st
     text = st.write_stream(pieces_then_rest())
     stop.empty()
     st.session_state.pop("partial", None)  # finished: nothing to keep from a stop
+    JOBS.pop((chat_owner(), slot), None)
     if stream.error is not None:
         status.update(label="Could not finish", state="error")
         e = stream.error
@@ -1729,7 +1775,7 @@ def paint_pages(pptx, folder, built, ui: EditorUI, on_page=None) -> dict:
     return {"pdf": pdf, "pages": pages, "why": why or ("" if pages else "page images need poppler (pdftoppm)")}
 
 
-def build_deck_now(fmt, theme, ui: EditorUI | None = None, chat_id: str | None = None):
+def build_deck_now(fmt, theme, ui: EditorUI | None = None, chat_id: str | None = None, stream=None):
     """The Copilot plans the deck from this week's data; without it the rule planner picks from the same stories.
     The .pptx, its PDF and one image per slide are kept under data/exports/decks/<fingerprint>/ and remembered
     against the data fingerprint, so the same data never builds twice. In the slide editor `ui` shows each slide
@@ -1741,7 +1787,7 @@ def build_deck_now(fmt, theme, ui: EditorUI | None = None, chat_id: str | None =
         ui.say("The Copilot is reading this week's data and planning the slides…")
         try:
             ans = stream_answer(engine.deck_ask(fmt, theme), chat_id, "Build the slides",
-                                stream=engine.build_deck_streaming(fmt, theme, user, chat_id), slot="_deck")
+                                stream=stream or engine.build_deck_streaming(fmt, theme, user, chat_id), slot="_deck", kind="build")
             if ans is not None:
                 built, how, note = engine.built_deck(ans), "copilot", ans.text
         except AgentUnavailable as e:
@@ -1794,10 +1840,6 @@ def open_deck_editor(fmt, theme, build=False, sel=1):
 def _close_editor():
     if st.session_state.get("deck_ed"):
         st.session_state["deck_ed"]["open"] = False
-    if (p := st.session_state.get("partial")) and p.get("slot") == "_deck":
-        # closed while the Copilot was building or editing: keep what it wrote and stop the run, so the next
-        # question in the main Copilot does not wait behind it
-        absorb_partial(p.get("chat"), [], "_deck")
 
 
 def _ed_rerun():
@@ -1924,7 +1966,7 @@ def rebuild_from_spec(ed, hit, new, instruction, ui: EditorUI, how, note) -> Ans
     return Answer(reply, [{"tool": "build_brief_pptx", "args": {"format": fmt, "theme": new["theme"]}, "result": out}], "rules")
 
 
-def edit_deck(ed, hit, instruction, via_rules, chat_id, ui: EditorUI) -> Answer | None:
+def edit_deck(ed, hit, instruction, via_rules, chat_id, ui: EditorUI, stream=None) -> Answer | None:
     """One instruction from the editor's chat (or a stage button): the Copilot revises the spec and builds
     again, streamed like any Copilot answer (status line, Stop); plain commands and the buttons go through the
     rule editor, which also stands in when the Copilot is offline or fails. Undo restores an earlier version
@@ -1982,9 +2024,10 @@ def edit_deck(ed, hit, instruction, via_rules, chat_id, ui: EditorUI) -> Answer 
     # instant, answers in the instruction's language, and never files anything in the library
     if new or (said and "Copilot" not in said and said not in (_de.HELP, _de.HELP_ZH)):
         via_rules = True
-    if engine.ready and not via_rules:
+    if engine.ready and (not via_rules or stream is not None):
         ans = stream_answer(engine.deck_edit_ask(fmt, theme, spec, instruction, sel), chat_id, instruction,
-                            stream=engine.edit_deck_streaming(fmt, theme, spec, instruction, user, chat_id, sel), slot="_deck")
+                            stream=stream or engine.edit_deck_streaming(fmt, theme, spec, instruction, user, chat_id, sel),
+                            slot="_deck", kind="edit")
         if ans is None:  # the Copilot failed (a Stop never returns here): the rule editor stands in where it can
             if new:
                 out = rebuild_from_spec(ed, hit, new, instruction, ui, how, note)
@@ -2031,6 +2074,11 @@ def deck_editor():
     asked = st.session_state.pop("deck_ask", None)  # a pill, Ask again, the regenerate button or a stage button
     if isinstance(asked, str):
         asked = (asked, False)
+    resume = st.session_state.pop("resume_deck", None)  # the window was closed or the page switched mid-run
+    if resume and resume.get("kind") == "build":
+        ed["build"] = True
+    elif resume and not asked:
+        asked = (resume["q"], False)
     building = bool(ed.get("build"))
     hit = None if building else cached_deck(fmt, theme)
     d = (hit or {}).get("data") or {}
@@ -2100,6 +2148,14 @@ def deck_editor():
             thread = st.container(key="deck_thread")
             sugg = st.empty()
             ask_ph = st.empty()
+    if hit and not building and not asked and len(pages) < len(titles) and Path(hit["path"]).exists():
+        # the window was closed or the page switched while the pages were being rendered: finish them now
+        ui = EditorUI(head_ph, thumbs_ph, stage_ph)
+        built_like = {"slides": [{"title": t, "layout": l} for t, l in zip(titles, layouts)]}
+        shown = paint_pages(Path(hit["path"]), Path(hit["path"]).parent, built_like, ui)
+        d.update(pdf=shown["pdf"], pages=shown["pages"], preview_note=shown["why"])
+        app.store.save_cached("deck", deck_fingerprint(fmt, theme), d, hit["path"])
+        _ed_rerun()
     if not building:
         with thumbs_ph.container():
             if not pages:
@@ -2176,7 +2232,7 @@ def deck_editor():
             with st.chat_message("assistant"):
                 chat_id = ensure_chat("_deck", title)
                 ui = EditorUI(head_ph, thumbs_ph, stage_ph)
-                how, note, ans = build_deck_now(fmt, theme, ui, chat_id)
+                how, note, ans = build_deck_now(fmt, theme, ui, chat_id, resume["stream"] if resume else None)
             hit = cached_deck(fmt, theme)
             if hit and ans is not None:
                 label, plain = DECK_MSG[how]
@@ -2192,7 +2248,8 @@ def deck_editor():
             with st.chat_message("assistant"):
                 chat_id = ensure_chat("_deck", title)
                 ui = EditorUI(head_ph, thumbs_ph, stage_ph)
-                ans = edit_deck(ed, hit, question, asked[1], chat_id, ui) if hit else Answer("Build the slides first.")
+                ans = edit_deck(ed, hit, question, asked[1], chat_id, ui, resume["stream"] if resume else None) if hit \
+                    else Answer("Build the slides first.")
                 if ans is not None:
                     show_answer(ans, text_done=True, downloads=False)
             if ans is not None:
@@ -2211,21 +2268,58 @@ def deck_button(fmt, col):
     theme = st.session_state.setdefault(f"deck_theme_{fmt}", "data-white" if fmt == "ic" else "navy-gold")
     hit = cached_deck(fmt, theme)
     d = (hit or {}).get("data") or {}
-    if hit:
+    job = running_job("_deck")
+    running = job is not None  # still going, or finished while nobody watched: opening the window shows it
+    if running:
+        tip = "The slides are being built or changed in the background; open the window to watch"
+    elif hit:
         edits = len(d.get("edits") or [])
         tip = (f"{len(d.get('titles') or [])} slides · {DECK_THEMES.get(d['theme'], d['theme'])} · "
                f"{'chosen by the Copilot' if d['how'] == 'copilot' else 'picked by rules'} · built {when(hit['ts'])}"
                + (f" · edited {edits} time{'s' if edits != 1 else ''}" if edits else ""))
     else:
         tip = "Plans a 3-6 slide deck from this week's data; you watch each slide being laid out"
-    if col.button("Slides" if hit else "Build slides", key=f"mk_deck_{fmt}", width="stretch",
+    if col.button("Slides · working…" if running else ("Slides" if hit else "Build slides"), key=f"mk_deck_{fmt}", width="stretch",
                   type="secondary", icon=material("presentation"), help=tip):
-        open_deck_editor(fmt, theme, build=not hit)
+        if running:
+            ed = st.session_state.get("deck_ed") or dict(job.get("ed") or {}) or {"fmt": fmt, "theme": theme, "sel": 1}
+            ed["open"] = True
+            st.session_state["deck_ed"] = ed
+            if not st.session_state.get("chat_id_deck"):
+                open_chat(job.get("chat"), "_deck")
+        else:
+            open_deck_editor(fmt, theme, build=not hit)
 
 
 def deck_panel(fmt):
     if (st.session_state.get("deck_ed") or {}).get("open"):
         deck_editor()
+
+
+def write_brief_in_background(fmt, fp):
+    """Writes the brief in a thread of its own and saves it against the data fingerprint; the page shows a
+    spinner and looks again every two seconds. Switching pages (or closing the tab) does not stop the writing,
+    and coming back shows the brief once it is saved. Returns the cached brief when it is there."""
+    jobs = st.session_state.setdefault("bg_jobs", {})
+    job = jobs.get(fp)
+    if job is None or (not job.is_alive() and not app.store.cached("brief", fp)):
+        def work():
+            try:
+                brief = app.call("generate_brief", {"format": fmt}, user)["summary"]
+                app.store.save_cached("brief", fp, brief)
+            except Exception as e:  # noqa: BLE001
+                app.store.save_cached("brief", fp, f"The brief could not be written: {e}")
+        job = jobs[fp] = threading.Thread(target=work, daemon=True, name=f"brief-{fmt}")
+        job.start()
+
+    @st.fragment(run_every="2s")
+    def poll():
+        if app.store.cached("brief", fp):
+            st.rerun()
+        st.html('<div class="loa-muted">Writing the brief… you can switch pages; it carries on in the background.</div>')
+    with st.spinner("Writing the brief…"):
+        poll()
+    return None
 
 
 def brief_page():
@@ -2254,13 +2348,11 @@ def brief_page():
     # Only new data, a changed pick of signals, or "Write again" calls the model.
     fp = brief_fingerprint(fmt)
     hit = None if st.session_state.pop("brief_redo", False) else app.store.cached("brief", fp)
-    if hit:
-        brief, made = hit["data"], hit["ts"]
-    else:
-        with st.spinner("Writing the brief…"):
-            brief = app.call("generate_brief", {"format": fmt}, user)["summary"]
-        app.store.save_cached("brief", fp, brief)
-        made = app.store.cached("brief", fp)["ts"]
+    if not hit:
+        hit = write_brief_in_background(fmt, fp)
+        if not hit:
+            return  # the page polls until the brief is there; switching pages does not stop the writing
+    brief, made = hit["data"], hit["ts"]
     row[1].download_button("Download (.md)", brief, file_name="london-office-team-brief.md", width="stretch")
     deck_button(fmt, row[2])
     deck_panel(fmt)

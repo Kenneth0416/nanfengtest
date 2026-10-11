@@ -1672,10 +1672,11 @@ def test_describe_names_the_chart_change():
     assert "最近 4 期" in de.describe(old, new2, "只顯示最近四季")
 
 
-def test_a_stopped_copilot_run_is_killed_and_the_next_question_does_not_queue_behind_it(app, tmp_path, monkeypatch):
-    """Pressing Stop (or asking again, or reloading the page) used to leave the Node run going, and the next
-    question waited on the per-person lock with 'Reading market data…' until it finished. Now Stop kills the run,
-    and a question that finds the lock held for more than PI_WAIT seconds stops the earlier run itself."""
+def test_a_stopped_copilot_run_is_killed_and_a_waiting_question_says_so(app, tmp_path, monkeypatch):
+    """Pressing Stop used to leave the Node run going, and the next question waited on the per-person lock with
+    'Reading market data…' until it finished, without a word. Now Stop kills the run; a question that finds the
+    lock held (a deck being built in the background, say) waits its turn with a 'waiting' event, and Stop on
+    the waiting question abandons only the wait."""
     import threading, time
     from core.pi_engine import AgentCancelled, PiDurableEngine
     if not shutil.which("node"):
@@ -1702,7 +1703,8 @@ def test_a_stopped_copilot_run_is_killed_and_the_next_question_does_not_queue_be
     assert eng.cancel("Kenneth")
     t.join(timeout=10)
     assert got == {"cancelled": True} and not eng._lock("Kenneth").locked()
-    # a question arriving while an earlier run holds the lock stops that run after PI_WAIT seconds
+    # a question arriving while an earlier run holds the lock waits its turn (the earlier run may be a deck being
+    # built in the background) and says so; a Stop on the waiting question abandons the wait, not the earlier run
     t2 = threading.Thread(target=first, daemon=True)
     got.clear()
     t2.start()
@@ -1710,10 +1712,46 @@ def test_a_stopped_copilot_run_is_killed_and_the_next_question_does_not_queue_be
         if eng._running.get("Kenneth"):
             break
         time.sleep(0.1)
-    events = []
-    t0 = time.monotonic()
-    with pytest.raises(RuntimeError):  # the second run is a missing script: it fails on its own, not by waiting
-        eng._run("missing.ts", "{}", "Kenneth", None, events.append)
-    assert time.monotonic() - t0 < 15 and {"event": "cancelled_previous"} in events
+    events, token = [], {"cancelled": False}
+    waiter = {}
+
+    def second():
+        try:
+            eng._run("missing.ts", "{}", "Kenneth", None, events.append, None, "", token)
+        except AgentCancelled:
+            waiter["cancelled"] = True
+    t3 = threading.Thread(target=second, daemon=True)
+    t3.start()
+    time.sleep(2.5)
+    assert any(e.get("event") == "waiting" for e in events) and t2.is_alive() and eng._running.get("Kenneth")
+    token["cancelled"] = True
+    t3.join(timeout=5)
+    assert waiter == {"cancelled": True} and t2.is_alive()  # the earlier run was left alone
+    assert eng.cancel("Kenneth")
     t2.join(timeout=10)
     assert got == {"cancelled": True}
+
+
+def test_a_streamed_answer_can_be_read_again_after_an_interruption(app):
+    """The person switched pages while the Copilot was writing: the run goes on, and the thread that picks it up
+    again reads every event from the first one (so nothing written is lost) and gets the finished answer."""
+    import threading, time
+    from core.engine import Engine, StreamingAnswer
+    engine = Engine(app)
+    calls = []
+
+    def fake_ask(question, role, history=None, on_event=None, conversation=None, mode="", token=None):
+        calls.append(question)
+        for w in ("one ", "two ", "three "):
+            on_event({"event": "delta", "text": w})
+            time.sleep(0.05)
+        on_event({"event": "tool", "name": "get_signals"})
+        from core.pi_engine import Answer
+        return Answer("one two three", [], "fake")
+    engine.ask = fake_ask
+    sa = StreamingAnswer(engine, "What changed?", "Kenneth")
+    first = next(sa.events())  # one reader read a piece and was interrupted
+    assert first["event"] == "delta" and first["text"] == "one "
+    again = list(sa.events())  # the second reader gets everything from the start
+    assert [e.get("text") for e in again if e["event"] == "delta"] == ["one ", "two ", "three "]
+    assert again[-1] == {"event": "tool", "name": "get_signals"} and sa.answer.text == "one two three" and calls == ["What changed?"]
