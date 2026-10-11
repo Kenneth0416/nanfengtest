@@ -26,6 +26,11 @@ NAVY, INK, MUTED, GOLD, RULE, PANEL = "1B3A5C", "1F2A44", "6B7385", "B9781A", "D
 BLUE, GOOD, BAD = "3A62A8", "2E7D4F", "A8322A"
 HEAD, BODY, CJK = "Cambria", "Calibri", "Microsoft JhengHei"
 REF = re.compile(r"\[(\d+|internal)\]")
+
+
+def unref(text: str) -> str:
+    """Text without its [n] references or the space before each, so 'average [1].' reads 'average.'."""
+    return re.sub(r"\s*\[(?:\d+|internal)\]", "", text or "").strip()
 _LOCK = threading.Lock()
 
 
@@ -66,9 +71,11 @@ def parse(md: str) -> Brief:
     for line in (md or "").splitlines():
         if re.match(r"^#\s", line) and not b.title:
             b.title = line.lstrip("#").strip()
-        elif re.match(r"^#{2,3}\s", line):
+        elif re.match(r"^##\s", line) or (cur is None and re.match(r"^###\s", line)):
             cur = (line.lstrip("#").strip(), [])
             b.sections.append(cur)
+        elif re.match(r"^###\s", line):  # a sub-heading stays inside its section
+            cur[1].append(line)
         elif cur is None:
             pre.append(line)
         else:
@@ -453,9 +460,12 @@ def _chart_png(kind, data, unit="", w=6.6, h=3.0) -> bytes:
                     seg.append((x, y))
             ax.plot(xs[-1:], ys[-1:], color="#" + GOLD, marker="o", ms=6, zorder=4)
             first = next(i for i, y in enumerate(ys) if y is not None)
-            for i in (first, len(ys) - 1):
-                ax.annotate(f"{ys[i]:.1f}{unit}", (i, ys[i]), textcoords="offset points", xytext=(0, 7), ha="center",
-                            fontsize=8, color="#" + INK, fontweight="bold")
+            # the first value sits up and to the left of its point and the latest up and to the right, on the side
+            # the line does not run, so no segment crosses either label
+            for i, dx, ha in ((first, -4, "right"), (len(ys) - 1, 4, "left")):
+                ax.annotate(f"{ys[i]:.1f}{unit}", (i, ys[i]), textcoords="offset points", xytext=(dx, 5), ha=ha,
+                            va="bottom", fontsize=8, color="#" + INK, fontweight="bold", zorder=6,
+                            bbox={"boxstyle": "square,pad=0.1", "fc": "white", "ec": "none", "alpha": 0.85})
             lo, hi = min(have + lta), max(have + lta)
             if hi - lo < 1e-9:  # one quarter, or every quarter the same: give the axis some height
                 lo, hi = lo - (abs(lo) * 0.1 or 1), hi + (abs(hi) * 0.1 or 1)
@@ -485,7 +495,7 @@ def _chart_png(kind, data, unit="", w=6.6, h=3.0) -> bytes:
             if kind == "line":  # the column chart names its average in the caption, clear of the bars
                 ax.text(-0.3, lta[-1], f"Long-term avg {lta[-1]:.1f}{unit}", va="top", ha="left", zorder=5,
                         **{**label, "color": "#" + GOLD})
-        ax.margins(x=0.07)
+        ax.margins(x=0.07 if kind == "column" else 0.11)  # room for the end labels beside the line
         ax.grid(axis="y", color="#" + RULE, lw=0.5)
         ax.tick_params(axis="x", labelsize=6.8, length=0)
         ax.tick_params(axis="y", labelsize=7)
@@ -523,7 +533,7 @@ def takeaways(doc, hl: str, said: list[str]):
     refs = "".join(f"[{r}]" for r in dict.fromkeys(REF.findall(hl)))
     cell.paragraphs[0].paragraph_format.space_after = Pt(0)
     for i, line in enumerate(said):
-        line = REF.sub("", line).strip()
+        line = unref(line)
         p = cell.paragraphs[0] if i == 0 else para(cell)
         p.paragraph_format.space_after = Pt(5)
         p.paragraph_format.left_indent = Mm(5)
@@ -561,7 +571,7 @@ def tiles_and_table(doc, rows, head, body, col, n):
                 label = get(r, "metric") or get(r, "market")
                 _font(cell.paragraphs[0].add_run(label.upper()), BODY, 7, MUTED, True, spacing=0.6)
                 p = para(cell, after=0, line=1.0)
-                _font(p.add_run(nice_dates(REF.sub("", get(r, "latest")).strip())), HEAD, 17, NAVY)
+                _font(p.add_run(nice_dates(unref(get(r, "latest")))), HEAD, 17, NAVY)
                 for m in REF.findall(get(r, "latest")):
                     _raise(_font(p.add_run(f"[{m}]"), BODY, 8.5, NAVY, True), 8)
                 chg = get(r, "change")
@@ -597,6 +607,44 @@ def tiles_and_table(doc, rows, head, body, col, n):
     p = para(doc, before=3, after=0)
     _font(p.add_run("Change is against the previous quarter; pp = percentage points. Green and red show whether "
                     "the move is good or bad for an owner of London offices."), BODY, 7.5, MUTED, italic=True)
+
+
+def section_table(doc, rows):
+    """Any other table in the brief: a navy header row, the first column as the row label, the rest equal."""
+    if not rows:
+        return
+    n_cols = len(rows[0])
+    first = 40 if n_cols > 2 else 85
+    widths = [first] + [(170 - first) / (n_cols - 1) - 0.01] * (n_cols - 1) if n_cols > 1 else [170]
+    t = doc.add_table(rows=len(rows), cols=n_cols)
+    _fixed(t, widths)
+    _no_split(t)
+    t.rows[0]._tr.get_or_add_trPr().append(OxmlElement("w:tblHeader"))
+    _borders(t, RULE, True, True, 4)
+    for ri, r in enumerate(rows):
+        for ci, txt in enumerate(r):
+            cell = t.rows[ri].cells[ci]
+            _margins(cell, top=Mm(1.4).twips, bottom=Mm(1.4).twips, left=Mm(2).twips, right=Mm(2).twips)
+            p = cell.paragraphs[0]
+            p.paragraph_format.space_after = Pt(0)
+            if ri == 0:
+                _shade(cell, NAVY)
+                _font(p.add_run(txt.upper()), BODY, 7.5, "FFFFFF", True, spacing=0.5)
+                continue
+            if ri % 2 == 0:
+                _shade(cell, "F7F6F2")
+            m = re.match(r"^(.*?)\s*\(([+-][\d.]+(?:pp)?)\)$", txt)  # 'value [n] (+0.50pp)': the move in colour
+            if ci and m:
+                rich(p, m.group(1), 9, INK)
+                _font(p.add_run(f"  {m.group(2)}"), BODY, 8, _move_colour(m.group(2), r[0]))
+            else:
+                rich(p, txt, 9, NAVY if ci == 0 else INK, bold=(ci == 0))
+    if len(rows) <= 15:  # a short table stays on one page with its heading: each row keeps with the next
+        for r in t.rows[:-1]:
+            for cell in r.cells:
+                for p in cell.paragraphs:
+                    _keep_next(p)
+    para(doc, after=2)
 
 
 def draw_charts(doc, charts, deck_cite):
@@ -659,7 +707,7 @@ def draw_charts(doc, charts, deck_cite):
 
 
 # ------------------------------------------------------------------------------------------------- the document
-def build_docx(md: str, fmt: str, deck: dict, out: Path, team: str = "London office team") -> Path:
+def build_docx(md: str, deck: dict, out: Path, team: str = "London office team") -> Path:
     """`md` is the brief as written; `deck` is skills.brief_deck.tools.deck_data (series for the charts)."""
     b = parse(md)
     sources = list(b.sources)
@@ -692,8 +740,6 @@ def build_docx(md: str, fmt: str, deck: dict, out: Path, team: str = "London off
     st = styles["Normal"]
     st.font.name, st.font.size = BODY, Pt(10)
     st.element.rPr.rFonts.set(qn("w:eastAsia"), CJK)
-    is_ic = fmt == "ic"
-    kind = "IC paper section" if is_ic else "Board summary"
     date_text = (b.sub.split("·")[0].strip() if b.sub else "")
     rows = table_rows(b.numbers)
     head, body = (rows[0], rows[1:]) if rows else ([], [])
@@ -717,7 +763,7 @@ def build_docx(md: str, fmt: str, deck: dict, out: Path, team: str = "London off
                 deck_cite(d.get("ref"))
     hl = " ".join(ln.strip() for ln in b.headline if ln.strip())
     said = sentences(hl)
-    report = "London Office Market · " + ("IC Paper" if is_ic else "Weekly Brief")
+    report = "London Office Market · Team Brief"
     doc.core_properties.title = report
     doc.core_properties.author = team
     doc.core_properties.subject = "London office market research note"
@@ -743,14 +789,14 @@ def build_docx(md: str, fmt: str, deck: dict, out: Path, team: str = "London off
     for _ in range(5):
         para(c, after=6)
     p = para(c, after=6)
-    _font(p.add_run(f"RESEARCH  ·  {kind.upper()}"), BODY, 9, GOLD, True, spacing=2)
+    _font(p.add_run("RESEARCH  ·  TEAM BRIEF"), BODY, 9, GOLD, True, spacing=2)
     p = para(c, after=10, line=1.0)
     _font(p.add_run("London Office Market"), HEAD, 34, "FFFFFF")
     p = para(c, after=18, line=1.0)
-    _font(p.add_run("Investment committee section" if is_ic else "Weekly brief"), HEAD, 22, "C9D1DE", italic=True)
+    _font(p.add_run("Weekly brief"), HEAD, 22, "C9D1DE", italic=True)
     p = para(c, after=4)
     _para_border(p, "top", GOLD, 12, 10)
-    first = REF.sub("", said[0]).strip() if said else ""
+    first = unref(said[0]) if said else ""
     if len(first) > 230:  # the cover takes one sentence; a very long one is cut at a word, the page has it all
         first = first[:230].rsplit(" ", 1)[0].rstrip(",;:") + "…"
     if first:
@@ -835,14 +881,28 @@ def build_docx(md: str, fmt: str, deck: dict, out: Path, team: str = "London off
     # ---- the remaining sections, as written
     for h, lines in b.sections:
         n += 1
-        heading(doc, h, 16, n, {"What changed": "Signals", "Supports": "Signals", "Risks": "Signals", "Other": "Signals",
+        heading(doc, h, 16, n, {"Submarket": "Evidence", "What changed": "Signals", "Supports": "Signals", "Risks": "Signals", "Other": "Signals",
                                 "Our deals": "Internal", "Market deals": "Evidence", "Market talk": "Unconfirmed",
-                                "Macro": "Context"}.get(next((k for k in ("What changed", "Supports", "Risks", "Other",
+                                "Macro": "Context"}.get(next((k for k in ("Submarket", "What changed", "Supports", "Risks", "Other",
                                                                           "Our deals", "Market deals", "Market talk",
                                                                           "Macro") if h.startswith(k)), ""), "Detail"))
-        for ln in lines:
-            s = ln.strip()
+        i = 0
+        while i < len(lines):
+            s = lines[i].strip()
+            i += 1
             if not s:
+                continue
+            if _is_table(s):  # a table inside a section, e.g. the submarket evidence: drawn whatever its columns
+                block = [s]
+                while i < len(lines) and _is_table(lines[i]):
+                    block.append(lines[i].strip())
+                    i += 1
+                section_table(doc, table_rows(block))
+                continue
+            if s.startswith("### "):
+                p = para(doc, before=8, after=3)
+                _keep_next(p)
+                _font(p.add_run(s[4:].strip()), HEAD, 12, NAVY)
                 continue
             if s.startswith("- "):
                 s = s[2:]
@@ -940,7 +1000,7 @@ def build_docx(md: str, fmt: str, deck: dict, out: Path, team: str = "London off
     return out
 
 
-def plain_docx(md: str, fmt: str, out: Path, team: str) -> Path:
+def plain_docx(md: str, out: Path, team: str) -> Path:
     """The safety net: the brief as a plain, still-branded document (header logo, headings, paragraphs, tables),
     used only if the research-note layout meets content it cannot place, so a download never fails."""
     doc = Document()
@@ -983,21 +1043,21 @@ def plain_docx(md: str, fmt: str, out: Path, team: str) -> Path:
     return out
 
 
-def build(ctx, md: str, fmt: str, out_dir: Path) -> dict:
+def build(ctx, md: str, out_dir: Path) -> dict:
     """The .docx and its PDF under out_dir. Returns {"docx", "pdf", "why"}; without LibreOffice there is no PDF
     and `why` says so."""
     from core import preview
     from skills.brief_deck import tools as bd
-    deck = bd.deck_data(ctx, fmt)
-    name = "london-office-ic-paper" if fmt == "ic" else "london-office-weekly-brief"
+    deck = bd.deck_data(ctx)
+    name = "london-office-team-brief"
     team = ctx.config.get("team", {}).get("name", "London office team")
     out = Path(out_dir) / f"{name}.docx"
     with _LOCK:  # matplotlib's pyplot is not thread-safe, and two pages may ask at once
         try:
-            docx = build_docx(md, fmt, deck, out, team)
+            docx = build_docx(md, deck, out, team)
         except Exception as e:  # noqa: BLE001  (content the layout did not expect: still give the reader a file)
             print(f"[report] research-note layout failed, plain layout used: {e!r}", flush=True)
-            docx = plain_docx(md, fmt, out, team)
+            docx = plain_docx(md, out, team)
     pdf, why = preview.render_pdf(docx, out_dir)
     if pdf:
         final = Path(out_dir) / f"{name}.pdf"

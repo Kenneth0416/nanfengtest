@@ -177,22 +177,22 @@ class Engine:
         return StreamingAnswer(self, question, role, conversation)
 
     @staticmethod
-    def deck_ask(fmt: str, theme: str | None) -> str:
-        return (f"Build this week's team brief deck as a {'IC' if fmt == 'ic' else 'board'} pack"
+    def deck_ask(theme: str | None) -> str:
+        return ("Build this week's team brief deck, one deck for the board and the investment committee"
                 + (f" on the {theme} theme" if theme else "") + ". Call brief_deck_data first and read the ranked stories: "
                 "decide yourself which of them deserve a slide this week (1-4 content slides; leave out anything that did "
                 "not move or does not matter to the person asking), which layout and chart or table each gets, the theme "
                 "if none was given, and the order. Write one finding per title, a so_what where the layout takes one, "
                 "speaker notes, and a `why` on every slide saying what in this week's data earned it. Call "
-                "brief_deck_guide('storyline') if you need the rules. Then call build_brief_pptx with format and spec; "
+                "brief_deck_guide('storyline') if you need the rules. Then call build_brief_pptx with the spec; "
                 "if it refuses or lists problems, fix exactly those and build again. Finish with one line per slide "
                 "and its why.")
 
     @staticmethod
-    def deck_edit_ask(fmt: str, theme: str, spec: dict, instruction: str, sel: int | None = None) -> str:
+    def deck_edit_ask(theme: str, spec: dict, instruction: str, sel: int | None = None) -> str:
         """An edit to a built deck: the current spec travels with the request so the Copilot changes only what
         was asked and builds the whole deck again from the revised spec."""
-        return (f"The team is editing the {'IC' if fmt == 'ic' else 'board'} deck in the slide editor. Its current spec "
+        return ("The team is editing the team brief deck in the slide editor. Its current spec "
                 f"(theme {theme}, {len(spec.get('slides', []))} slides) is:\n```json\n{json.dumps(spec, ensure_ascii=False)}\n```\n"
                 f"They ask: {instruction}\n"
                 + (f"The person is looking at slide {sel} (id {spec['slides'][sel - 1].get('id', '?')}); 'this slide' means that one.\n"
@@ -207,7 +207,7 @@ class Engine:
                 "(or N slides), call brief_deck_data and take the best-ranked stories that are not already in the deck "
                 "(or the topic named), with a layout from brief_deck_guide('layouts'), a `why`, and figures only as the "
                 "data gives them; keep the cover first and the sources slide last and renumber the eyebrows. Then call "
-                "build_brief_pptx with format, theme and the full revised spec; if it refuses or lists problems, fix "
+                "build_brief_pptx with the theme and the full revised spec; if it refuses or lists problems, fix "
                 "those and build again (never by dropping slides). Finish with one or two lines, in the language of "
                 "the instruction, that describe the deck exactly as the last successful build returned it: which slides "
                 "were added, changed or moved, and the final slide count. Do not claim anything the build did not do, "
@@ -218,23 +218,23 @@ class Engine:
         return next((t["result"].get("data") for t in reversed(ans.trace)
                      if t["tool"] == "build_brief_pptx" and (t["result"].get("data") or {}).get("path")), None)
 
-    def build_deck(self, fmt: str, theme: str | None, user: str) -> tuple[dict | None, Answer]:
+    def build_deck(self, theme: str | None, user: str) -> tuple[dict | None, Answer]:
         """The Copilot plans the deck from this week's data: reads brief_deck_data (the ranked stories), decides
         which deserve a slide, which layouts and charts, writes titles, so-whats and a `why` per slide, builds,
         fixes anything the check reports. Returns (build result data, the Copilot's answer)."""
-        ans = self._run(self.pi.ask, self.deck_ask(fmt, theme), user, None, None, None, "deck")
+        ans = self._run(self.pi.ask, self.deck_ask(theme), user, None, None, None, "deck")
         return self.built_deck(ans), ans
 
-    def build_deck_streaming(self, fmt: str, theme: str | None, user: str, conversation: str | None = None) -> "StreamingAnswer":
+    def build_deck_streaming(self, theme: str | None, user: str, conversation: str | None = None) -> "StreamingAnswer":
         """The same plan, watched: tool starts and the Copilot's words arrive as events; `built_deck(.answer)`
         gives the build once the events end."""
         self._check()
-        return StreamingAnswer(self, self.deck_ask(fmt, theme), user, conversation, "deck")
+        return StreamingAnswer(self, self.deck_ask(theme), user, conversation, "deck")
 
-    def edit_deck_streaming(self, fmt: str, theme: str, spec: dict, instruction: str, user: str,
+    def edit_deck_streaming(self, theme: str, spec: dict, instruction: str, user: str,
                             conversation: str | None = None, sel: int | None = None) -> "StreamingAnswer":
         self._check()
-        return StreamingAnswer(self, self.deck_edit_ask(fmt, theme, spec, instruction, sel), user, conversation, "deck")
+        return StreamingAnswer(self, self.deck_edit_ask(theme, spec, instruction, sel), user, conversation, "deck")
 
     def read_upload(self, path, user: str) -> tuple[dict | None, list[str], str]:
         """A colleague's PDF upload, read by the information agent for their review.

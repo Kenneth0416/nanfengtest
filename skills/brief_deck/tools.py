@@ -1,7 +1,7 @@
 """Team brief as an editable PowerPoint, 3-6 slides, on one of five house themes.
 
 Two halves:
-  deck_data(ctx, fmt)                      -> dict  every figure, chart series and footnote, read from the store
+  deck_data(ctx)                           -> dict  every figure, chart series and footnote, read from the store
   scripts/build_deck.build(d, path, spec)  -> dict  python-pptx fills templates/<theme>.pptx (13 named layouts)
 
 The design pack (templates, themes, layouts and the two scripts) was written for this project after a
@@ -20,7 +20,6 @@ the default storyline without a model.
 from __future__ import annotations
 
 import json
-import re
 import sys
 from datetime import date
 from pathlib import Path
@@ -52,18 +51,17 @@ _THEME_WORDS = {"forest": "forest-cream", "green": "forest-cream", "charcoal": "
                 "深色": "charcoal-amber", "炭": "charcoal-amber", "深藍": "navy-gold", "深蓝": "navy-gold", "白": "data-white"}
 
 
-def deck_request(text: str) -> tuple[str, str] | None:
-    """(format, theme) when a sentence asks for slides, so the app can still build a deck without the Copilot.
-    "a client update deck on the forest theme" -> ("board", "forest-cream"); "slides for the IC" -> ("ic", "data-white")."""
+def deck_request(text: str) -> str | None:
+    """The theme when a sentence asks for slides, so the app can still build a deck without the Copilot.
+    "a client update deck on the forest theme" -> "forest-cream"; "slides for the IC" -> "navy-gold" (one brief
+    serves the board and the investment committee)."""
     t = text.lower()
     if not any(w in t for w in _DECK_WORDS):
         return None
-    ic = bool(re.search(r"\bic\b|investment committee|投委會|投委会|投資委員會|投资委员会", t))
-    theme = next((v for k, v in _THEME_WORDS.items() if k in t), "data-white" if ic else "navy-gold")
-    return ("ic" if ic else "board", theme)
+    return next((v for k, v in _THEME_WORDS.items() if k in t), "navy-gold")
 
 
-def deck_data(ctx, fmt: str = "board") -> dict:
+def deck_data(ctx) -> dict:
     """Everything a deck states, from the library: the same summary, signals and footnotes as the
     markdown brief (generate_brief), plus the chart series."""
     st = ctx.store
@@ -123,7 +121,7 @@ def deck_data(ctx, fmt: str = "board") -> dict:
                 "markets": s.markets[:2], "flag": s.flag,
                 "refs": "".join(notes.ref(e.text, e.url, e.source_id) for e in s.evidence)}
 
-    # IC paper: evidence for the team's submarkets, the same list the written brief and the Word/PDF carry.
+    # The evidence table for the team's submarkets, the same list the written brief and the Word/PDF carry.
     focus = team_focus(ctx.config)
     ic_markets = focus["markets"]
     evidence = []
@@ -136,8 +134,12 @@ def deck_data(ctx, fmt: str = "board") -> dict:
                                  "text": (sn["text"] + (" (flagged)" if sn["flagged"] else "") + " " + sn["ref"]) if sn else "n/a",
                                  "change": chg_text(sn) if sn else ""})
         evidence.append(row)
+    empty = {c["metric"] for c in (evidence[0]["cells"] if evidence else [])
+             if all(next(x for x in r["cells"] if x["metric"] == c["metric"])["text"] == "n/a" for r in evidence)}
+    for row in evidence:  # a measure no submarket has a figure for is left out, as in the written brief
+        row["cells"] = [c for c in row["cells"] if c["metric"] not in empty]
 
-    ours = I.for_brief(st, fmt)
+    ours = I.for_brief(st)
     our_deals = [{"property": d["property"], "tenant": d.get("tenant") or "Tenant not recorded", "rent": d.get("rent") or "",
                   "term": d.get("term") or "", "rent_free": d.get("rent_free") or "", "date": d.get("date") or "",
                   "submarket": d.get("submarket") or "", "level": d.get("confidentiality", "internal"),
@@ -148,11 +150,11 @@ def deck_data(ctx, fmt: str = "board") -> dict:
     rules = st.watch_rules()
     who = sorted({i["added_by"] for i in items if i.get("added_by")})
     d = {
-        "format": fmt, "evidence": evidence, "focus": {"markets": focus.get("markets") or []},
-        "title": "IC paper: London office market" if fmt == "ic" else f"{team.get('name', 'Team')}: weekly brief",
+        "evidence": evidence, "focus": {"markets": focus.get("markets") or []},
+        "title": f"{team.get('name', 'Team')}: weekly brief",
         "date": f"{date.today():%d %b %Y}",
         "picked_by": (f"{len(sigs)} signals chosen by {', '.join(who)}" if picked
-                      else build_deck.cover_line(fmt, f"{date.today():%d %b %Y}", kpis[0]["period"] if kpis else "")),
+                      else build_deck.cover_line(f"{date.today():%d %b %Y}", kpis[0]["period"] if kpis else "")),
         "headline": team_summary(st, sigs),
         "kpis": kpis, "macro": macro,
         "vacancy": series("London", "vacancy_pct"), "take_up": series("London", "take_up_msqft"),
@@ -176,7 +178,7 @@ GUIDES = {"storyline": HERE / "references" / "storyline.md", "layouts": HERE / "
 
 
 def brief_deck_data(ctx, args):
-    d = deck_data(ctx, args.get("format") or "board")
+    d = deck_data(ctx)
     k = ", ".join(f"{x['label']} {x['text']} ({x['period']})" for x in d["kpis"])
     charts = [c for c in build_deck.CHARTS if d.get(c)]
     stories = "\n".join(f"- {c['key']} (score {c['score']}): {c['reason']} → suggested {c['layout']}: \"{c['title']}\""
@@ -208,8 +210,7 @@ def brief_deck_guide(ctx, args):
 
 def build_brief_pptx(ctx, args):
     """The deck, from the library only: the agent's `spec` (or the old `slides`) carries the words, never figures."""
-    fmt = args.get("format") or "board"
-    d = deck_data(ctx, fmt)
+    d = deck_data(ctx)
     theme = args.get("theme") or None
     spec = args.get("spec") or None
     storyline = "copilot" if spec else "rules"
@@ -220,7 +221,7 @@ def build_brief_pptx(ctx, args):
     spec = {k: v for k, v in spec.items() if k in ("theme", "slides")}
     folder = ctx.root / "data" / "exports"
     folder.mkdir(parents=True, exist_ok=True)
-    path = folder / f"{date.today():%Y-%m-%d}-team-brief-{fmt}.pptx"
+    path = folder / f"{date.today():%Y-%m-%d}-team-brief.pptx"
     dd = {k: v for k, v in d.items() if k not in ("stories", "focus")}  # scores and focus are not figures a slide may quote
     try:
         built = build_deck.build(dd, str(path), spec, theme)
@@ -245,7 +246,7 @@ def build_brief_pptx(ctx, args):
                    "\n- ".join(problems)
     return {"summary": summary,
             "data": {"path": str(path), "theme": built["theme"], "slides": slides, "refused": [],
-                     "problems": problems, "format": fmt, "storyline": storyline, "spec": spec,
+                     "problems": problems, "storyline": storyline, "spec": spec,
                      "why": [s.get("why", "") for s in spec["slides"]]}}
 
 
@@ -259,7 +260,7 @@ TOOLS = [
     Tool("brief_deck_data", "The team brief's figures for a slide deck: headline, KPI tiles, chart series, signal "
                             "cards, market talk, flagged figures, footnotes, and the default storyline with its "
                             "titles. Read this before writing a spec.",
-         obj_schema({"format": {"type": "string", "enum": ["board", "ic"]}}), brief_deck_data),
+         obj_schema({}), brief_deck_data),
     Tool("brief_deck_guide", "The deck design notes: 'storyline' (slide order and wording rules; read it before "
                              "writing a spec), 'layouts' (the 13 layouts, their fill placeholders and chart/table/"
                              "hero keys), 'style' (themes and colour rules), 'example' (a complete 5-slide board "
@@ -274,8 +275,7 @@ TOOLS = [
                              "earned it (from the stories brief_deck_data lists). Any number in spec text that is not "
                              "in the data is refused, and the result lists `problems` the check found. Without a spec "
                              "the rule-based planner picks the storyline; `slides` = {key: {title, notes}} retitles it.",
-         obj_schema({"format": {"type": "string", "enum": ["board", "ic"]},
-                     "theme": {"type": "string", "enum": THEMES},
+         obj_schema({"theme": {"type": "string", "enum": THEMES},
                      "spec": {"type": "object", "properties": {
                          "theme": {"type": "string", "enum": THEMES},
                          "slides": {"type": "array", "items": SLIDE_SCHEMA}}},

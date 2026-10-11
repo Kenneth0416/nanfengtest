@@ -5,8 +5,9 @@
                                          data, new report titles (runs on Pi; scheduled daily)
   python main.py process "<link or instruction>"   hand one item to the information agent
   python main.py chat                    talk to the agent (Pi)
-  python main.py brief [--ic] [--pptx] [--theme t]  print the team brief (board summary or IC paper section); --pptx builds
-                                         the 6-slide deck under data/exports/ and prints its path (for a weekly timer)
+  python main.py brief [--pptx] [--theme t]  print the team brief (one brief for the board and the investment
+                                         committee); --pptx builds the 6-slide deck under data/exports/ and prints
+                                         its path (for a weekly timer)
   python main.py signals                 the team's top signals
   python main.py ingest path/to/report.pdf [--save]
   python main.py classify "Headline text"
@@ -25,7 +26,6 @@ def main(argv=None):
                                        "housekeep"])
     p.add_argument("text", nargs="?", help="question, file path or headline")
     p.add_argument("--user", default="cli", help="your name, for your own focus and team activity")
-    p.add_argument("--ic", action="store_true", help="brief: IC paper section instead of board summary")
     p.add_argument("--pptx", action="store_true", help="brief: build the PowerPoint deck instead of printing markdown")
     p.add_argument("--theme", help="brief --pptx: navy-gold, editorial-cream, data-white, charcoal-amber or forest-cream")
     p.add_argument("--fixed", action="store_true", help="brief --pptx: skip the Copilot, rule-picked storyline only")
@@ -64,10 +64,9 @@ def run(app, a):
         return show(Engine(app).gather(a.user if a.user != "cli" else "scheduler"))
     if a.command == "brief":
         if a.pptx:
-            fmt = "ic" if a.ic else "board"
             if not a.fixed:
                 try:  # the Copilot plans the deck from this week's data; rules only when Pi is not running
-                    built, ans = Engine(app).build_deck(fmt, a.theme, a.user)
+                    built, ans = Engine(app).build_deck(a.theme, a.user)
                     if built:
                         print(ans.text)
                         print(f"Deck saved at {built['path']} (storyline by the Copilot)")
@@ -75,10 +74,10 @@ def run(app, a):
                     print("The Copilot did not produce a deck; falling back to the rule-picked storyline.")
                 except AgentUnavailable as e:
                     print(f"Fallback, rule-picked storyline: {e}")
-            out = app.call("build_brief_pptx", {"format": fmt, "theme": a.theme}, a.user)
+            out = app.call("build_brief_pptx", {"theme": a.theme}, a.user)
             print(out["summary"])
             return 0 if out["data"].get("path") else 1
-        print(app.call("generate_brief", {"format": "ic" if a.ic else "board"}, a.user)["summary"])
+        print(app.call("generate_brief", {}, a.user)["summary"])
     elif a.command == "signals":
         print(app.call("get_signals", {"limit": 8}, a.user)["summary"])
     elif a.command == "ingest":

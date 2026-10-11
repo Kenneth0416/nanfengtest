@@ -47,20 +47,25 @@ _BAN_REV = re.compile(r"[^.]{0,200}\b(scrap\w*|crawl\w*|robots?|automated|text a
                       r"is not allowed|are not allowed)[^.]{0,120}\.?", re.I)
 
 
+_ASK = re.compile(r"(?i)^(please\s+)?(can you\s+|could you\s+)?(follow|add|track|watch|subscribe to)\b\s*")
+
+
 def resolve(text: str) -> dict:
-    """A link, or a name we know ('Savills Market Watch'). Returns name, publisher, url, cadence."""
+    """A link, or a name we know ('Savills Market Watch'). Returns name, publisher, url, cadence. The asking
+    words are not part of the name: "Follow Savills Market Watch" is named "Savills Market Watch"."""
     text = text.strip()
     url = re.search(r"https?://\S+", text)
     if url:
         u = url.group(0).rstrip(").,")
-        name = re.sub(r"(?i)^(please\s+)?(follow|add|track|watch)\b", "", text.replace(url.group(0), "")).strip(" -:")
+        name = _ASK.sub("", text.replace(url.group(0), "").strip()).strip(" -:")
         return {"name": name or _publisher(u), "publisher": _publisher(u), "url": u, "cadence": ""}
-    low = re.sub(r"^(follow|add|track|watch)\s+", "", text.lower()).strip()
+    name = _ASK.sub("", text).strip(" -:") or text
+    low = name.lower()
     for key in sorted(NAMES, key=len, reverse=True):
         if key in low:
             pub, u, cadence = NAMES[key]
-            return {"name": text.strip() if len(text) < 80 else pub, "publisher": pub, "url": u, "cadence": cadence}
-    return {"name": text, "publisher": "", "url": "", "cadence": ""}
+            return {"name": name if len(name) < 80 else pub, "publisher": pub, "url": u, "cadence": cadence}
+    return {"name": name, "publisher": "", "url": "", "cadence": ""}
 
 
 def _publisher(url: str) -> str:

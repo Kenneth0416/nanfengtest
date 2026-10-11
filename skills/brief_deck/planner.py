@@ -139,29 +139,34 @@ def stories(d: dict, focus: dict | None = None, rules: list[dict] | None = None)
 def plan_spec(d: dict, theme: str | None = None, focus: dict | None = None, rules: list[dict] | None = None) -> dict:
     """A storyline from this week's stories, without a model: the strongest candidates get a slide each."""
     from build_deck import DEFAULT_THEME, PLAN_MAX
-    theme = theme or ("data-white" if d["format"] == "ic" else DEFAULT_THEME)
+    theme = theme or DEFAULT_THEME
     cands = stories(d, focus, rules)
-    room = PLAN_MAX - 2 - (1 if d.get("signals") else 0) - (1 if d["format"] == "ic" and d.get("evidence") else 0)
+    room = PLAN_MAX - 2 - (1 if d.get("signals") else 0) - (1 if d.get("evidence") else 0)
     strong = [c for c in cands if c["score"] >= 1.5][:min(room, MAX_CONTENT)] or cands[:MIN_CONTENT]
     slides = [{"key": "cover", "layout": "Cover", "eyebrow": "London office market  ·  " + d["date"], "title": d["title"],
                "why": "The headline and the four KPIs open every brief.", "notes": "Headline: " + " ".join(d["headline"]),
                "fill": {"subtitle": d["picked_by"], "headline": d["headline"], "kpis": "auto", "caveat": d["caveat"]}}]
     n = 1
-    if d["format"] == "ic" and d.get("evidence"):
-        n += 1
-        slides.append({"key": "evidence", "layout": "Title only", "eyebrow": f"{n:02d}  ·  Market evidence",
-                       "title": "Market evidence for the submarkets in focus", "why": "An IC paper always carries the evidence table.",
-                       "notes": "Evidence table for the IC paper.", "fill": {"table": {"table": "evidence"}}})
-    for c in strong:
+    evidence = {"key": "evidence", "layout": "Title only", "eyebrow": "",
+                "title": "Market evidence for the team's submarkets",
+                "why": "The brief always carries the evidence table for the investment committee.",
+                "notes": "The submarket evidence table, as in the written brief.",
+                "fill": {"table": {"table": "evidence"}}}
+    for i, c in enumerate(strong):
         n += 1
         slides.append({"key": c["key"], "layout": c["layout"], "eyebrow": f"{n:02d}  ·  {c['key'].replace('_', ' ')}",
                        "title": c["title"], "why": c["reason"], "so_what": c.get("so_what", ""),
                        "notes": c["reason"] + ".", "fill": c["fill"]})
+        if i == 0 and d.get("evidence"):  # the week's lead story first, then the evidence behind the case
+            n += 1
+            slides.append({**evidence, "eyebrow": f"{n:02d}  ·  Market evidence"})
+    if not strong and d.get("evidence"):
+        n += 1
+        slides.append({**evidence, "eyebrow": f"{n:02d}  ·  Market evidence"})
     if d.get("signals"):
         n += 1
         slides.append({"key": "signals", "layout": "Signal cards", "eyebrow": f"{n:02d}  ·  What changed",
-                       "title": ("What supports the case, and what puts it at risk" if d["format"] == "ic"
-                                 else "What changed this week and why it matters"),
+                       "title": "What supports the case, and what puts it at risk",
                        "why": f"{len(d['signals'])} signal cards the team ranked this week.",
                        "notes": "\n".join(f"- {c['title']}: {c['detail']} {c['refs']}" for c in d["signals"]),
                        "fill": {"cards": "auto", "talk": "auto"}})

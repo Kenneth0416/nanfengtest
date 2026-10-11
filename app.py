@@ -3,7 +3,7 @@
 One shared tool for the whole business team, built around three jobs:
   Monitor     what changed, for you or for the whole team
   Copilot     ask anything from any page (Ctrl+K, or its own page)
-  Team brief  the signals people added, written up as a board summary or an IC paper section
+  Team brief  the signals people added, written up as one brief for the board and the investment committee
 plus Sources, the team's shared data library: open data the agent collects by itself, and reports any
 colleague uploads (when the publisher's terms bar automated collection). Whoever adds or checks a
 figure, the whole team sees it, with who and when.
@@ -24,11 +24,11 @@ from datetime import date, datetime, timezone
 from pathlib import Path
 
 import pandas as pd
-import plotly.graph_objects as go
 import streamlit as st
 import streamlit.components.v1 as components
 
 from core import analytics as an
+from core import charts as _charts
 from core import preview as _preview
 from core import deck_edit as _de
 from core import documents
@@ -522,9 +522,9 @@ HELP_OUTLINE = [  # shown until the illustrated guide is in assets/help/
     ("Ask Copilot", "Ask about the market in plain English or Chinese. The answer streams in with every figure "
                     "linked to its source; **Stop** keeps what is written. Your conversations are saved under "
                     "your name, and **Share to team** shows an answer to colleagues."),
-    ("Team brief", "The week's brief, written from the signals the team added, as a board summary or an IC paper "
-                   "section. **Word** and **PDF** download it as a research note; **Build slides** opens the "
-                   "slide editor."),
+    ("Team brief", "The week's brief, written from the signals the team added: one brief for the board and the "
+                   "investment committee, with the submarket evidence and what supports the case or puts it at risk. "
+                   "**Word** and **PDF** download it as a research note; **Build slides** opens the slide editor."),
     ("Slides", "Change the deck by asking (\"swap slides 2 and 3\", \"theme forest\"). **Undo** and the version list "
                "go back; **Download .pptx** and **PDF** take the deck away."),
     ("Sources", "One library for the team: open data collected automatically, reports colleagues upload, and the "
@@ -595,22 +595,15 @@ def page_header(title: str, subtitle: str, extra: tuple | None = None):
     st.html(f'<div class="loa-h1">{esc(title)}</div><div class="loa-sub">{esc(subtitle)}</div>')
 
 
+_CHART_SEQ = [0]  # app.py runs afresh on every rerun, so this counts the charts of one run, in drawing order
+
+
 def chart(spec: dict | None):
+    """A chart with a key of its own: two identical charts on one page no longer share an element id."""
     if not spec:
         return
-    fig = go.Figure()
-    for s in spec["series"]:
-        if spec["type"] == "bar":
-            fig.add_bar(x=spec["x"], y=s["values"], name=s["name"], marker_color="#1B3A5C")
-        else:
-            fig.add_scatter(x=spec["x"], y=s["values"], name=s["name"], mode="lines+markers",
-                            line_shape="hv" if spec["type"] == "step" else "linear",
-                            line=dict(dash="dot", color="#6B7A90") if s["name"] == "Long-term average"
-                            else dict(color="#1B3A5C"))
-    fig.update_layout(title=spec["title"], yaxis_title=spec.get("unit", ""), height=300,
-                      margin=dict(l=10, r=10, t=40, b=10), legend=dict(orientation="h"),
-                      paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)")
-    st.plotly_chart(fig, width="stretch")
+    _CHART_SEQ[0] += 1
+    _charts.show(spec, key=f"chart-{_CHART_SEQ[0]}-{_charts.fingerprint(spec)}")
 
 
 def show_answer(ans, text_done: bool = False, downloads: bool = True):
@@ -622,8 +615,12 @@ def show_answer(ans, text_done: bool = False, downloads: bool = True):
             with st.expander(f"Worked through {len(ans.trace)} step{'s' if len(ans.trace) != 1 else ''}", expanded=False):
                 st.caption("Tools: " + ", ".join(tools))
         st.markdown(split_follow_ups(ans.text)[0])
+    drawn = set()
     for step in ans.trace:
-        chart(step["result"].get("chart"))
+        spec = step["result"].get("chart")
+        if spec and _charts.fingerprint(spec) not in drawn:  # the same chart asked for twice is shown once
+            drawn.add(_charts.fingerprint(spec))
+            chart(spec)
         if downloads and step["tool"] == "build_brief_pptx" and (p := (step["result"].get("data") or {}).get("path")) and Path(p).exists():
             st.download_button("Download the slides (.pptx)", Path(p).read_bytes(), file_name=Path(p).name,
                                mime="application/vnd.openxmlformats-officedocument.presentationml.presentation",
@@ -963,7 +960,8 @@ def copilot_body(full: bool = False, question: str | None = None, own_input: boo
     sugg = st.empty()  # example questions or follow-ups go here, under the thread, but only when nothing is being asked
     if own_input:
         question = st.chat_input(chat_placeholder(ctx), key="copilot_input", max_chars=2000)
-    if not question and not clicked:
+    resuming = bool(st.session_state.get("resume"))  # an answer still being written picks up below: no greeting over it
+    if not question and not clicked and not resuming:
         with sugg.container():
             if not turns:  # the examples belong to a new chat; afterwards only the last answer's own follow-ups show
                 empty_state(ctx, intro, suggestions, sfx)
@@ -1034,11 +1032,12 @@ def running_job(slot: str = ""):
     """The partial of this person's run in `slot`, from this session or (after a reload) from the shared table."""
     p = st.session_state.get("partial")
     if p and p.get("slot", "") == slot:
-        return p
+        return None if st.session_state.get(f"stop_{p.get('chat')}") else p  # Stop just pressed: it is ending
     r = st.session_state.get("resume" + slot)  # handed over by a run that gave way to a click (the close button)
     if r and r.get("owner") == chat_owner():
         return r
-    return JOBS.get((chat_owner(), slot))
+    j = JOBS.get((chat_owner(), slot))
+    return None if j and st.session_state.get(f"stop_{j.get('chat')}") else j
 
 
 def absorb_partial(chat_id, turns, slot: str = ""):
@@ -1151,20 +1150,20 @@ def copilot_thread(turns, ctx, question):
         _rerun()
     if question and not engine.ready and (want := _bd.deck_request(question)):
         # The Copilot is offline: a request for slides still gets a deck, picked by rules from this week's data.
-        fmt, theme = want
+        theme = want
         with st.chat_message("user"):
             st.markdown(question)
         with st.chat_message("assistant"):
-            hit = cached_deck(fmt, theme)  # the same data never builds twice
-            how = hit["data"]["how"] if hit else build_deck_now(fmt, theme)[0]
-            hit = hit or cached_deck(fmt, theme)
+            hit = cached_deck(theme)  # the same data never builds twice
+            how = hit["data"]["how"] if hit else build_deck_now(theme)[0]
+            hit = hit or cached_deck(theme)
             if how and hit:
                 lines = "\n".join(f"- {line}" for line in hit["data"].get("slides") or [])
-                reply = ((f"這台伺服器上 Copilot 離線，所以由規則從本週數據選頁：{fx.BRIEF_FORMATS[fmt]}、{DECK_THEMES[theme]}。"
+                reply = ((f"這台伺服器上 Copilot 離線，所以由規則從本週數據選頁：{DECK_THEMES[theme]}。"
                           f"數字與來源相同，只是頁面取捨與標題是標準版。要改頁面請到 Team brief 按 Open editor。\n\n" + lines)
                          if _de.is_zh(question) else
                          (f"The Copilot is offline on this server, so rules picked the slides from this week's data: "
-                          f"{fx.BRIEF_FORMATS[fmt].lower()}, {DECK_THEMES[theme]}. The numbers and sources are the same; "
+                          f"{DECK_THEMES[theme]}. The numbers and sources are the same; "
                           "the choice of slides and the titles are standard. To change slides, open the editor on Team brief.\n\n" + lines))
                 st.markdown(reply)
                 st.download_button("Download .pptx", Path(hit["path"]).read_bytes(), key=f"dl_chat_{len(turns)}",
@@ -1698,8 +1697,6 @@ DECK_THEMES = {"navy-gold": "Navy & gold · team and board", "editorial-cream": 
                "forest-cream": "Forest & cream · client update"}
 
 
-FORMAT_HELP = {"board": "Board summary: 3-6 slides for a reader with three minutes; headline, the moves that matter, what changed.",
-               "ic": "IC paper section: adds the evidence table and groups the signals into supports / risks for the investment committee."}
 DECK_MSG = {"copilot": ("Slides chosen by the Copilot", "It read this week's data and picked the slides, layouts and titles."),
             "rules": ("Slides picked by rules" + ("" if engine.ready else " (Copilot offline)"),
                       "The numbers and sources are the same; only the choice of slides and the titles are standard.")}
@@ -1718,19 +1715,54 @@ def theme_swatches() -> str:
     return '<div style="line-height:22px">' + "".join(out) + "</div>"
 
 
-def brief_fingerprint(fmt: str) -> str:
-    """What the brief is made from: the library's data fingerprint, the format, and whether a model writes the
-    headline. Same fingerprint, same brief: it is read back instead of written again."""
-    return f"{app.store.data_fingerprint()}-{fmt}-{'llm' if getattr(app.llm, 'available', False) else 'rules'}"
+def code_version(*paths: str) -> str:
+    """A short hash of the code that lays a file out. It is part of each cache key, so a new version of the layout
+    makes the files again on the next visit, while the model's words (cached apart) are not asked for again."""
+    h = hashlib.sha1()
+    for rel in paths:
+        for f in sorted(app.root.glob(rel)):
+            if f.is_file():
+                h.update(f.read_bytes())
+    return h.hexdigest()[:8]
 
 
-def deck_fingerprint(fmt: str, theme: str) -> str:
-    return f"{app.store.data_fingerprint()}-{fmt}-{theme}-{'copilot' if engine.ready else 'rules'}"
+BRIEF_CODE = ("skills/market_brief/tools.py", "core/internal.py", "core/summary.py")
+REPORT_CODE = ("skills/market_brief/report.py", "skills/brief_deck/tools.py", "core/preview.py", "assets/brand/**/*")
+DECK_CODE = ("skills/brief_deck/tools.py", "skills/brief_deck/planner.py", "skills/brief_deck/scripts/*.py",
+             "skills/brief_deck/templates/*", "core/preview.py")
 
 
-def cached_deck(fmt: str, theme: str) -> dict | None:
-    """The deck built from this data for this format and theme, if its files are still there."""
-    fp = deck_fingerprint(fmt, theme)
+@st.cache_data(show_spinner=False)
+def _versions(_mtimes: str) -> dict:
+    return {"brief": code_version(*BRIEF_CODE), "report": code_version(*REPORT_CODE), "deck": code_version(*DECK_CODE)}
+
+
+def versions() -> dict:
+    """The three code versions, hashed again only when one of the files changes on disk."""
+    files = [f for rel in BRIEF_CODE + REPORT_CODE + DECK_CODE for f in app.root.glob(rel) if f.is_file()]
+    return _versions("|".join(f"{f}:{f.stat().st_mtime_ns}" for f in sorted(set(files))))
+
+
+def brief_fingerprint() -> str:
+    """What the brief is made from: the library's data fingerprint, the code that writes it, and whether a model
+    writes the headline. Same fingerprint, same brief: it is read back instead of written again. (A new version
+    of the code writes it again, but the model's headline is cached by its facts, so the model is not asked
+    twice for the same week.)"""
+    return f"{app.store.data_fingerprint()}-w{versions()['brief']}-{'llm' if getattr(app.llm, 'available', False) else 'rules'}"
+
+
+def deck_plan_key(theme: str) -> str:
+    """The data, theme and planner a deck's storyline belongs to, whatever version of the code lays it out."""
+    return f"{app.store.data_fingerprint()}-{theme}-{'copilot' if engine.ready else 'rules'}"
+
+
+def deck_fingerprint(theme: str) -> str:
+    return f"{deck_plan_key(theme)}-r{versions()['deck']}"
+
+
+def cached_deck(theme: str) -> dict | None:
+    """The deck built from this data on this theme by this version of the code, if its files are still there."""
+    fp = deck_fingerprint(theme)
     hit = app.store.cached("deck", fp)
     if hit and not (hit["path"] and Path(hit["path"]).exists()):
         app.store.forget_cached("deck", fp)  # data/ was cleared: build again when asked
@@ -1741,12 +1773,17 @@ def cached_deck(fmt: str, theme: str) -> dict | None:
 MAX_VERSIONS = 20
 
 
-def store_deck(fmt, theme, built, how, note, shown, edits=None, versions=None, ver=1, pptx=None):
+def store_deck(theme, built, how, note, shown, edits=None, versions=None, ver=1, pptx=None):
     """Remember a built deck (its spec, slides, PDF and page images) against the data fingerprint. `versions`
-    are the earlier states of this deck (newest last), each with its own files, so Undo needs no rebuild."""
-    fp = deck_fingerprint(fmt, built["theme"])
-    pptx = pptx or (app.root / "data" / "exports" / "decks" / fp / f"v{ver}" / f"london-office-team-brief-{fmt}-{built['theme']}.pptx")
-    data = {"theme": built["theme"], "format": fmt, "how": how, "note": note if how == "rules" and note else "",
+    are the earlier states of this deck (newest last), each with its own files, so Undo needs no rebuild. The
+    storyline (spec) is also kept apart from the code version, so new layout code lays the same slides out
+    again without asking the Copilot."""
+    fp = deck_fingerprint(built["theme"])
+    pptx = pptx or (app.root / "data" / "exports" / "decks" / fp / f"v{ver}" / f"london-office-team-brief-{built['theme']}.pptx")
+    if built.get("spec"):
+        app.store.save_cached("deck_plan", deck_plan_key(built["theme"]),
+                              {"spec": built["spec"], "how": how, "note": note, "edits": edits or []})
+    data = {"theme": built["theme"], "how": how, "note": note if how == "rules" and note else "",
             "slides": [f"{s['title']}" + (f" — {w}" if w else "") for s, w in zip(built["slides"], built.get("why") or [])],
             "titles": [s["title"] for s in built["slides"]], "layouts": [s["layout"] for s in built["slides"]],
             "problems": built.get("problems") or [], "spec": built.get("spec"), "edits": edits or [],
@@ -1759,29 +1796,29 @@ def store_deck(fmt, theme, built, how, note, shown, edits=None, versions=None, v
 def deck_version(hit) -> dict:
     """The deck as it is now, kept aside before an edit replaces it: everything Undo needs to bring it back."""
     d = hit["data"]
-    return {k: d.get(k) for k in ("theme", "format", "how", "note", "slides", "titles", "layouts", "problems", "spec",
+    return {k: d.get(k) for k in ("theme", "how", "note", "slides", "titles", "layouts", "problems", "spec",
                                    "pdf", "pages", "preview_note", "ver")} | \
         {"path": hit["path"], "instruction": (d.get("edits") or ["build"])[-1], "ts": datetime.now().isoformat(timespec="seconds"),
          "edits": list(d.get("edits") or [])}
 
 
-def restore_version(fmt, theme, v, versions, instruction=""):
+def restore_version(theme, v, versions, instruction=""):
     """Puts an earlier version back as the current deck (its files are still in their own folder)."""
-    fp = deck_fingerprint(fmt, v["theme"])
-    data = {k: v.get(k) for k in ("theme", "format", "how", "note", "slides", "titles", "layouts", "problems", "spec",
+    fp = deck_fingerprint(v["theme"])
+    data = {k: v.get(k) for k in ("theme", "how", "note", "slides", "titles", "layouts", "problems", "spec",
                                    "pdf", "pages", "preview_note", "ver")} | \
         {"edits": list(v.get("edits") or []), "versions": versions[-MAX_VERSIONS:]}
     app.store.save_cached("deck", fp, data, v["path"])
     if v["theme"] != theme:
-        app.store.forget_cached("deck", deck_fingerprint(fmt, theme))
+        app.store.forget_cached("deck", deck_fingerprint(theme))
     return fp
 
 
-def deck_folder(fmt, built, ver=1) -> Path:
+def deck_folder(built, ver=1) -> Path:
     """The version's own folder under data/exports/decks/<fingerprint>/v<n>/, with the .pptx copied in."""
-    folder = app.root / "data" / "exports" / "decks" / deck_fingerprint(fmt, built["theme"]) / f"v{ver}"
+    folder = app.root / "data" / "exports" / "decks" / deck_fingerprint(built["theme"]) / f"v{ver}"
     folder.mkdir(parents=True, exist_ok=True)
-    pptx = folder / f"london-office-team-brief-{fmt}-{built['theme']}.pptx"
+    pptx = folder / f"london-office-team-brief-{built['theme']}.pptx"
     pptx.write_bytes(Path(built["path"]).read_bytes())
     return pptx
 
@@ -1864,39 +1901,49 @@ def paint_pages(pptx, folder, built, ui: EditorUI, on_page=None) -> dict:
     return {"pdf": pdf, "pages": pages, "why": why or ("" if pages else "page images need poppler (pdftoppm)")}
 
 
-def build_deck_now(fmt, theme, ui: EditorUI | None = None, chat_id: str | None = None, stream=None):
+def build_deck_now(theme, ui: EditorUI | None = None, chat_id: str | None = None, stream=None, fresh=False):
     """The Copilot plans the deck from this week's data; without it the rule planner picks from the same stories.
     The .pptx, its PDF and one image per slide are kept under data/exports/decks/<fingerprint>/ and remembered
     against the data fingerprint, so the same data never builds twice. In the slide editor `ui` shows each slide
     as it is laid out, and the Copilot's planning streams like any answer (status line, Stop) into the chat
-    column. Returns (how, note, answer)."""
+    column. When only the layout code changed since this data's deck was planned, the same storyline (with its
+    edits) is laid out again without asking the Copilot; `fresh` (Build again) plans it anew. Returns (how, note,
+    answer)."""
     ui = ui or EditorUI()
-    built, how, note, ans = None, "", "", None
-    if engine.ready:
+    built, how, note, ans, edits = None, "", "", None, []
+    plan = None if fresh or stream is not None else app.store.cached("deck_plan", deck_plan_key(theme))
+    if plan and (plan["data"] or {}).get("spec"):
+        ui.say("Laying out this week's slides again with the updated design…")
+        p = plan["data"]
+        out = app.call("build_brief_pptx", {"theme": theme, "spec": p["spec"]}, user)
+        if out["data"].get("path"):
+            built, how, note, edits = out["data"], p.get("how", "rules"), p.get("note", ""), list(p.get("edits") or [])
+            ans = Answer(out["summary"], [{"tool": "build_brief_pptx", "args": {"theme": theme}, "result": out}], "rules")
+    if not built and engine.ready:
         ui.say("The Copilot is reading this week's data and planning the slides…")
         try:
-            ans = stream_answer(engine.deck_ask(fmt, theme), chat_id, "Build the slides",
-                                stream=stream or engine.build_deck_streaming(fmt, theme, user, chat_id), slot="_deck", kind="build")
+            ans = stream_answer(engine.deck_ask(theme), chat_id, "Build the slides",
+                                stream=stream or engine.build_deck_streaming(theme, user, chat_id), slot="_deck", kind="build")
             if ans is not None:
                 built, how, note = engine.built_deck(ans), "copilot", ans.text
         except AgentUnavailable as e:
             note = str(e)
     if not built:  # fallback: the rule-based planner, still this week's stories, no model
         ui.say("Picking the slides by rules from this week's data…")
-        out = app.call("build_brief_pptx", {"format": fmt, "theme": theme}, user)
+        out = app.call("build_brief_pptx", {"theme": theme}, user)
         built, how = out["data"] if out["data"].get("path") else None, "rules"
-        ans = ans or Answer(out["summary"], [{"tool": "build_brief_pptx", "args": {"format": fmt, "theme": theme}, "result": out}], "rules")
+        ans = ans or Answer(out["summary"], [{"tool": "build_brief_pptx", "args": {"theme": theme}, "result": out}], "rules")
         if not built:
             ui.done("Not built", "error")
             st.warning(out["summary"])
             return "", "", None
-    pptx = deck_folder(fmt, built, 1)
-    store_deck(fmt, theme, built, how, note, {"pdf": "", "pages": [], "why": "rendering"})  # a Stop keeps what is built
-    shown = paint_pages(pptx, pptx.parent, built, ui, lambda sh: store_deck(fmt, theme, built, how, note, sh))
-    store_deck(fmt, theme, built, how, note, shown)
+    pptx = deck_folder(built, 1)
+    store_deck(theme, built, how, note, {"pdf": "", "pages": [], "why": "rendering"}, edits)  # a Stop keeps what is built
+    shown = paint_pages(pptx, pptx.parent, built, ui, lambda sh: store_deck(theme, built, how, note, sh, edits))
+    store_deck(theme, built, how, note, shown, edits)
     ui.done(f"{len(built['slides'])} slides · storyline {'chosen by the Copilot' if how == 'copilot' else 'picked by rules'} "
             "from this week's data")
-    app.store.log("brief", user, f"built the team brief slides ({fx.BRIEF_FORMATS[fmt].lower()}, {built['theme']}, "
+    app.store.log("brief", user, f"built the team brief slides ({built['theme']}, "
                                  f"{'storyline by the Copilot' if how == 'copilot' else 'rule-picked storyline'})")
     return how, note, ans
 
@@ -1909,18 +1956,18 @@ THEME_SHORT = {"navy-gold": "Navy gold", "editorial-cream": "Editorial", "data-w
                "charcoal-amber": "Charcoal", "forest-cream": "Forest"}
 
 
-def deck_chat_title(fmt, theme) -> str:
-    return f"{DECK_CHAT_PREFIX}{fx.BRIEF_FORMATS[fmt]} · {THEME_SHORT.get(theme, theme)}"
+def deck_chat_title(theme) -> str:
+    return f"{DECK_CHAT_PREFIX}Team brief · {THEME_SHORT.get(theme, theme)}"
 
 
-def open_deck_editor(fmt, theme, build=False, sel=1):
+def open_deck_editor(theme, build=False, sel=1):
     """Marks the editor open; deck_panel shows it at the end of the run, and it stays open across reruns until
     closed or dismissed. The conversation about this deck (the same saved chats as the Copilot, under the
     person's name) comes back with it; Build again starts a new one."""
     old = st.session_state.get("deck_ed") or {}
-    st.session_state["deck_ed"] = {"fmt": fmt, "theme": theme, "build": build, "sel": sel, "open": True}
-    if build or old.get("fmt") != fmt or old.get("theme") != theme or not st.session_state.get("chat_id_deck"):
-        title = deck_chat_title(fmt, theme)
+    st.session_state["deck_ed"] = {"theme": theme, "build": build, "sel": sel, "open": True}
+    if build or old.get("theme") != theme or not st.session_state.get("chat_id_deck"):
+        title = deck_chat_title(theme)
         chats = [] if build else [c for c in app.store.chats(chat_owner()) if c["title"] == title]
         open_chat(chats[0]["id"] if chats else None, "_deck")
         st.session_state["chat_owner_deck"] = chat_owner()
@@ -1942,13 +1989,13 @@ def _deck_theme_pick():
     ed = st.session_state["deck_ed"]
     v = st.session_state.get("ed_theme")
     if v and v != ed["theme"]:
-        hit = cached_deck(ed["fmt"], ed["theme"])
+        hit = cached_deck(ed["theme"])
         if hit and (hit["data"].get("edits") or hit["data"].get("versions")) and hit["data"].get("spec"):
             st.session_state["deck_ask"] = (f"theme {v}", True)
             return
-        ed.update(theme=v, sel=1, build=not cached_deck(ed["fmt"], v), theme_sync=True)
+        ed.update(theme=v, sel=1, build=not cached_deck(v), theme_sync=True)
         open_chat(None, "_deck")
-        st.session_state["deck_theme_want"] = (ed["fmt"], v)
+        st.session_state["deck_theme_want"] = v
 
 
 def deck_history(sfx: str):
@@ -1971,7 +2018,7 @@ def adopt_deck(ed, hit, built, instruction, ui: EditorUI, how, note, force=False
     asked to drop, it is held back and the person gets Apply / Keep buttons; otherwise the current deck is kept
     as a version, the new one is filed in its own folder, the pages are painted one by one and the reply
     describes what actually changed, slide by slide."""
-    fmt, theme = ed["fmt"], ed["theme"]
+    theme = ed["theme"]
     d = hit["data"]
     old_spec = d.get("spec")
     zh = _de.is_zh(instruction)
@@ -1990,14 +2037,14 @@ def adopt_deck(ed, hit, built, instruction, ui: EditorUI, how, note, force=False
     versions = list(d.get("versions") or []) + [deck_version(hit)]
     ver = int(d.get("ver") or 1) + 1
     edits = list(d.get("edits") or []) + [instruction]
-    pptx = deck_folder(fmt, built, ver)
-    keep = lambda sh: store_deck(fmt, theme, built, how, note, sh, edits, versions, ver, pptx)
+    pptx = deck_folder(built, ver)
+    keep = lambda sh: store_deck(theme, built, how, note, sh, edits, versions, ver, pptx)
     shown = paint_pages(pptx, pptx.parent, built, ui, keep)
     keep(shown)
     if built["theme"] != theme:  # the theme changed: the deck now lives under that theme
-        app.store.forget_cached("deck", deck_fingerprint(fmt, theme))
+        app.store.forget_cached("deck", deck_fingerprint(theme))
         ed.update(theme=built["theme"], theme_sync=True)
-        st.session_state["deck_theme_want"] = (fmt, built["theme"])
+        st.session_state["deck_theme_want"] = built["theme"]
     ed["sel"] = min(ed.get("sel") or 1, len(built["slides"]))
     ui.done(f"{len(built['slides'])} slides · edited {len(edits)} time{'s' if len(edits) != 1 else ''} in the editor")
     app.store.log("brief", user, f"edited the team brief slides: {instruction[:80]}")
@@ -2043,24 +2090,23 @@ def refusal_text(err: dict, instruction: str) -> str:
 
 def rebuild_from_spec(ed, hit, new, instruction, ui: EditorUI, how, note) -> Answer:
     """Builds the revised spec by rules and files it (or explains the refusal)."""
-    fmt = ed["fmt"]
     zh = _de.is_zh(instruction)
     ui.say("Building the slides again…")
-    out = app.call("build_brief_pptx", {"format": fmt, "theme": new["theme"], "spec": new}, user)
+    out = app.call("build_brief_pptx", {"theme": new["theme"], "spec": new}, user)
     built = out["data"] if out["data"].get("path") else None
     if not built:
         ui.done("Not built", "error")
         return Answer(refusal_text(out["data"], instruction) if out["data"].get("error") else (f"沒有建成：{out['summary']}" if zh else f"Not built: {out['summary']}"))
     reply = adopt_deck(ed, hit, built, instruction, ui, how, note)
-    return Answer(reply, [{"tool": "build_brief_pptx", "args": {"format": fmt, "theme": new["theme"]}, "result": out}], "rules")
+    return Answer(reply, [{"tool": "build_brief_pptx", "args": {"theme": new["theme"]}, "result": out}], "rules")
 
 
 def edit_deck(ed, hit, instruction, via_rules, chat_id, ui: EditorUI, stream=None) -> Answer | None:
     """One instruction from the editor's chat (or a stage button): the Copilot revises the spec and builds
     again, streamed like any Copilot answer (status line, Stop); plain commands and the buttons go through the
     rule editor, which also stands in when the Copilot is offline or fails. Undo restores an earlier version
-    without a build; 'make an IC version' switches the format. Returns the turn to save, or None after a Stop."""
-    fmt, theme = ed["fmt"], ed["theme"]
+    without a build. Returns the turn to save, or None after a Stop."""
+    theme = ed["theme"]
     d = hit["data"]
     spec = d.get("spec")
     zh = _de.is_zh(instruction)
@@ -2078,10 +2124,10 @@ def edit_deck(ed, hit, instruction, via_rules, chat_id, ui: EditorUI, stream=Non
         return Answer("這份簡報是在編輯器出現之前建的，沒有可改的 spec，請先按 Build again。" if zh else
                       "This deck was built before the editor existed, so I have no spec to change. Press Build again first.")
     how, note = d.get("how", "rules"), d.get("note", "")
-    stories = _bd.deck_data(app.ctx, fmt).get("stories") or []
+    stories = _bd.deck_data(app.ctx).get("stories") or []
     if len(stories) == 0 and not d.get("slides"):
         return Answer("資料庫還沒有數據，請先在 Sources 更新，再建簡報。" if zh else "The library has no data yet: update it on Sources first, then build.")
-    # the rule editor first: undo, format switches and plain commands never need the Copilot
+    # the rule editor first: undo and plain commands never need the Copilot
     new, said = _de.apply(instruction, spec, stories, sel)
     if isinstance(new, dict) and "undo" in new:
         versions = list(d.get("versions") or [])
@@ -2091,31 +2137,23 @@ def edit_deck(ed, hit, instruction, via_rules, chat_id, ui: EditorUI, stream=Non
         idx = 0 if new["undo"] == "first" else (new["undo"][1] - 1 if isinstance(new["undo"], tuple) else len(versions) - 1)
         idx = min(max(idx, 0), len(versions) - 1)
         v = versions[idx]
-        restore_version(fmt, theme, v, versions[:idx], instruction)
+        restore_version(theme, v, versions[:idx], instruction)
         if v["theme"] != theme:
             ed.update(theme=v["theme"], theme_sync=True)
-            st.session_state["deck_theme_want"] = (fmt, v["theme"])
+            st.session_state["deck_theme_want"] = v["theme"]
         ed["sel"] = min(sel, len(v.get("titles") or [1]))
         ui.done(f"Back to version {v.get('ver', idx + 1)}")
         what = v.get("instruction") or "build"
         return Answer((f"已回到第 {v.get('ver', idx + 1)} 版（{'初版' if what == 'build' else '「' + what + '」之後'}），共 {len(v.get('titles') or [])} 頁。" if zh else
                        f"Back to version {v.get('ver', idx + 1)} ({'the first build' if what == 'build' else 'after \"' + what + '\"'}): "
                        f"{len(v.get('titles') or [])} slides."), [], "rules")
-    if isinstance(new, dict) and "switch" in new:
-        want = new["switch"]
-        if want == fmt:
-            return Answer(said)
-        ed.update(fmt=want, theme="data-white" if want == "ic" else "navy-gold", build=True, sel=1)
-        st.session_state["deck_theme_want"] = (ed["fmt"], ed["theme"])
-        open_chat(None, "_deck")
-        return Answer(said, [], "rules")
     # a plain command the rule editor understands is applied by rules even with the Copilot on: it is exact,
     # instant, answers in the instruction's language, and never files anything in the library
     if new or (said and "Copilot" not in said and said not in (_de.HELP, _de.HELP_ZH)):
         via_rules = True
     if engine.ready and (not via_rules or stream is not None):
-        ans = stream_answer(engine.deck_edit_ask(fmt, theme, spec, instruction, sel), chat_id, instruction,
-                            stream=stream or engine.edit_deck_streaming(fmt, theme, spec, instruction, user, chat_id, sel),
+        ans = stream_answer(engine.deck_edit_ask(theme, spec, instruction, sel), chat_id, instruction,
+                            stream=stream or engine.edit_deck_streaming(theme, spec, instruction, user, chat_id, sel),
                             slot="_deck", kind="edit")
         if ans is None:  # the Copilot failed (a Stop never returns here): the rule editor stands in where it can
             if new:
@@ -2158,7 +2196,7 @@ def deck_editor():
         _close_editor()
         st.rerun()
     ed = st.session_state.get("deck_ed") or {}
-    fmt, theme = ed.get("fmt", "board"), ed.get("theme", "navy-gold")
+    theme = ed.get("theme", "navy-gold")
     sfx = "e"
     st.html('<span class="loa-deck-ed"></span>')
     chat_id, turns = current_chat("_deck")
@@ -2172,7 +2210,7 @@ def deck_editor():
     elif resume and not asked:
         asked = (resume["q"], False)
     building = bool(ed.get("build"))
-    hit = None if building else cached_deck(fmt, theme)
+    hit = None if building else cached_deck(theme)
     d = (hit or {}).get("data") or {}
     titles, layouts = d.get("titles") or [], d.get("layouts") or []
     pages = [q for q in d.get("pages") or [] if Path(q).exists()]
@@ -2181,7 +2219,7 @@ def deck_editor():
     busy = building or bool(asked)
     # header: name, theme, status, Stop / Build again + Download, history, close
     with st.container(key="deck_top", horizontal=True, vertical_alignment="center", gap="small"):
-        st.html(f'<div class="loa-cp-title">{ic("presentation", 18, "accent")}Slides <small>{esc(fx.BRIEF_FORMATS[fmt])}</small></div>',
+        st.html(f'<div class="loa-cp-title">{ic("presentation", 18, "accent")}Slides <small>Team brief</small></div>',
                 width="content")
         if ed.pop("theme_sync", False):
             st.session_state["ed_theme"] = theme  # an instruction or Undo changed the theme: the control follows
@@ -2198,7 +2236,7 @@ def deck_editor():
         if not building:
             if st.button("Build again", icon=material("refresh-cw"), key="ed_rebuild", width="content",
                          help="Plan the deck again from this week's data", disabled=busy):
-                ed.update(build=True, sel=1)
+                ed.update(build=True, fresh=True, sel=1)
                 open_chat(None, "_deck")
                 _ed_rerun()
             if hit:
@@ -2246,7 +2284,7 @@ def deck_editor():
         built_like = {"slides": [{"title": t, "layout": l} for t, l in zip(titles, layouts)]}
         shown = paint_pages(Path(hit["path"]), Path(hit["path"]).parent, built_like, ui)
         d.update(pdf=shown["pdf"], pages=shown["pages"], preview_note=shown["why"])
-        app.store.save_cached("deck", deck_fingerprint(fmt, theme), d, hit["path"])
+        app.store.save_cached("deck", deck_fingerprint(theme), d, hit["path"])
         _ed_rerun()
     if not building:
         with thumbs_ph.container():
@@ -2315,17 +2353,18 @@ def deck_editor():
                 _ed_rerun()
     with thread:
         thread_view(turns, sfx, busy=busy, target="deck_ask", downloads=False)  # the header holds the downloads
-        title = deck_chat_title(fmt, theme)
+        title = deck_chat_title(theme)
         if building:
             ed["build"] = False  # a Stop lands in the idle editor with what is built
-            asked_line = f"Build the {fx.BRIEF_FORMATS[fmt].lower()} slides on {THEME_SHORT.get(theme, theme)}"
+            fresh = ed.pop("fresh", False)
+            asked_line = f"Build the team brief slides on {THEME_SHORT.get(theme, theme)}"
             with st.chat_message("user"):
                 st.markdown(asked_line)
             with st.chat_message("assistant"):
                 chat_id = ensure_chat("_deck", title)
                 ui = EditorUI(head_ph, thumbs_ph, stage_ph)
-                how, note, ans = build_deck_now(fmt, theme, ui, chat_id, resume["stream"] if resume else None)
-            hit = cached_deck(fmt, theme)
+                how, note, ans = build_deck_now(theme, ui, chat_id, resume["stream"] if resume else None, fresh)
+            hit = cached_deck(theme)
             if hit and ans is not None:
                 label, plain = DECK_MSG[how]
                 text = (f"**{label}.** {plain}\n\n"
@@ -2352,13 +2391,13 @@ def deck_editor():
                     "const t=parent.document.querySelector('.st-key-deck_thread'); if (t) t.scrollTop=1e6;</script>", height=0)
 
 
-def deck_button(fmt, col):
+def deck_button(col):
     """The slides stay folded: one button beside the Word and PDF downloads. It opens the floating editor, building the deck
     first when none exists for this data; thumbnails, theme, downloads and the conversation all live there."""
-    if (w := st.session_state.pop("deck_theme_want", None)) and w[0] == fmt:
-        st.session_state[f"deck_theme_{fmt}"] = w[1]  # the editor changed the theme: follow it
-    theme = st.session_state.setdefault(f"deck_theme_{fmt}", "data-white" if fmt == "ic" else "navy-gold")
-    hit = cached_deck(fmt, theme)
+    if (w := st.session_state.pop("deck_theme_want", None)):
+        st.session_state["deck_theme"] = w  # the editor changed the theme: follow it
+    theme = st.session_state.setdefault("deck_theme", "navy-gold")
+    hit = cached_deck(theme)
     d = (hit or {}).get("data") or {}
     job = running_job("_deck")
     running = job is not None  # still going, or finished while nobody watched: opening the window shows it
@@ -2371,37 +2410,38 @@ def deck_button(fmt, col):
                + (f" · edited {edits} time{'s' if edits != 1 else ''}" if edits else ""))
     else:
         tip = "Plans a 3-6 slide deck from this week's data; you watch each slide being laid out"
-    if col.button("Slides · working…" if running else ("Slides" if hit else "Build slides"), key=f"mk_deck_{fmt}", width="stretch",
+    if col.button("Slides · working…" if running else ("Slides" if hit else "Build slides"), key="mk_deck", width="content",
                   type="secondary", icon=material("presentation"), help=tip):
         if running:
-            ed = st.session_state.get("deck_ed") or dict(job.get("ed") or {}) or {"fmt": fmt, "theme": theme, "sel": 1}
+            ed = st.session_state.get("deck_ed") or dict(job.get("ed") or {}) or {"theme": theme, "sel": 1}
             ed["open"] = True
             st.session_state["deck_ed"] = ed
             if not st.session_state.get("chat_id_deck"):
                 open_chat(job.get("chat"), "_deck")
         else:
-            open_deck_editor(fmt, theme, build=not hit)
+            open_deck_editor(theme, build=not hit)
 
 
-def deck_panel(fmt):
+def deck_panel():
     if (st.session_state.get("deck_ed") or {}).get("open"):
         deck_editor()
 
 
-def write_brief_in_background(fmt, fp):
+def write_brief_in_background(fp):
     """Writes the brief in a thread of its own and saves it against the data fingerprint; the page shows a
     spinner and looks again every two seconds. Switching pages (or closing the tab) does not stop the writing,
     and coming back shows the brief once it is saved. Returns the cached brief when it is there."""
     jobs = st.session_state.setdefault("bg_jobs", {})
     job = jobs.get(fp)
+    fresh = bool(st.session_state.pop("brief_fresh", False))  # Write again: a new headline from the model too
     if job is None or (not job.is_alive() and not app.store.cached("brief", fp)):
         def work():
             try:
-                brief = app.call("generate_brief", {"format": fmt}, user)["summary"]
+                brief = app.call("generate_brief", {"fresh": fresh}, user)["summary"]
                 app.store.save_cached("brief", fp, brief)
             except Exception as e:  # noqa: BLE001
                 app.store.save_cached("brief", fp, f"The brief could not be written: {e}")
-        job = jobs[fp] = threading.Thread(target=work, daemon=True, name=f"brief-{fmt}")
+        job = jobs[fp] = threading.Thread(target=work, daemon=True, name="brief")
         job.start()
 
     @st.fragment(run_every="2s")
@@ -2414,11 +2454,12 @@ def write_brief_in_background(fmt, fp):
     return None
 
 
-def report_files(fmt, fp, brief):
+def report_files(fp, brief):
     """The brief as a research note (.docx, and the same document as .pdf), made in a thread of its own from the
-    brief exactly as shown, and kept against the brief's text: opening the page again reads the files back, and
-    only new data or "Write again" makes them again. Returns the cached entry, or None while it is being made."""
-    key = f"{fp}-{hashlib.sha1(brief.encode()).hexdigest()[:10]}"
+    brief exactly as shown, and kept against the brief's text and the version of the layout code: opening the page
+    again reads the files back; new data, "Write again" or new layout code makes them again. Returns the cached
+    entry, or None while it is being made."""
+    key = f"{fp}-{hashlib.sha1(brief.encode()).hexdigest()[:10]}-r{versions()['report']}"
     hit = app.store.cached("brief_doc", key)
     d = (hit or {}).get("data") or {}
     docx_ok = bool(d.get("docx")) and Path(d["docx"]).is_file()
@@ -2441,7 +2482,7 @@ def report_files(fmt, fp, brief):
             ctx.store = own
             folder = app.root / "data" / "exports" / "briefs" / key
             try:
-                out = _report.build(ctx, brief, fmt, folder)
+                out = _report.build(ctx, brief, folder)
             except Exception as e:  # noqa: BLE001
                 out = {"docx": "", "pdf": "", "why": f"The report could not be made: {e}"}
             if out.get("docx"):
@@ -2449,46 +2490,47 @@ def report_files(fmt, fp, brief):
             else:
                 failed[key] = out
             own.db.close()
-        job = jobs["doc-" + key] = threading.Thread(target=work, daemon=True, name=f"brief-doc-{fmt}")
+        job = jobs["doc-" + key] = threading.Thread(target=work, daemon=True, name="brief-doc")
         job.start()
     return None
 
 
-def report_buttons(fmt, fp, brief, docx_col, pdf_col):
-    """Download (.docx) and Download (.pdf) in place of the Markdown download. While the files are being made the
-    two buttons wait, greyed out, and the row looks again every second."""
-    files = report_files(fmt, fp, brief)
+def report_buttons(fp, brief, row):
+    """Word and PDF downloads of the research note. While the files are being made the two buttons wait, greyed
+    out, and the row looks again every second. Every button is as wide as its label, so it is never cut short;
+    on a narrow window the row wraps instead."""
+    files = report_files(fp, brief)
     if files is None:
         @st.fragment(run_every="1s")
         def wait():
-            if report_files(fmt, fp, brief) is not None:
+            if report_files(fp, brief) is not None:
                 st.rerun()
-            st.button("Word…", disabled=True, width="stretch", key="rep_wait_docx", icon=material("file-text"),
-                      help="Laying out the research note from this brief")
-        with docx_col:
+        with row:
             wait()
-        pdf_col.button("PDF…", disabled=True, width="stretch", key="rep_wait_pdf", icon=":material/picture_as_pdf:",
-                       help="Laying out the research note from this brief")
+        row.button("Word…", disabled=True, width="content", key="rep_wait_docx", icon=material("file-text"),
+                   help="Laying out the research note from this brief")
+        row.button("PDF…", disabled=True, width="content", key="rep_wait_pdf", icon=":material/picture_as_pdf:",
+                   help="Laying out the research note from this brief")
         return
-    name = "london-office-ic-paper" if fmt == "ic" else "london-office-weekly-brief"
+    name = "london-office-team-brief"
     if files.get("docx"):
-        docx_col.download_button(
-            "Word", Path(files["docx"]).read_bytes(), file_name=f"{name}.docx", width="stretch",
-            mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document", key=f"dl_docx_{fmt}",
+        row.download_button(
+            "Word", Path(files["docx"]).read_bytes(), file_name=f"{name}.docx", width="content",
+            mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document", key="dl_docx",
             icon=material("file-text"), help="The research note as an editable Word document, in the house style")
     else:
-        if docx_col.button("Try again", icon=material("refresh-cw"), width="stretch", key=f"dl_retry_{fmt}",
-                           help=(files.get("why") or "The research note could not be made") + ". Press to make it again."):
+        if row.button("Try again", icon=material("refresh-cw"), width="content", key="dl_retry",
+                      help=(files.get("why") or "The research note could not be made") + ". Press to make it again."):
             st.session_state.get("doc_failed", {}).clear()
             st.rerun()
     if files.get("pdf") and Path(files["pdf"]).exists():
-        pdf_col.download_button("PDF", Path(files["pdf"]).read_bytes(), file_name=f"{name}.pdf",
-                                mime="application/pdf", width="stretch", key=f"dl_pdf_{fmt}",
-                                icon=":material/picture_as_pdf:", help="The same research note as a PDF")
+        row.download_button("PDF", Path(files["pdf"]).read_bytes(), file_name=f"{name}.pdf",
+                            mime="application/pdf", width="content", key="dl_pdf",
+                            icon=":material/picture_as_pdf:", help="The same research note as a PDF")
     else:
-        pdf_col.button("PDF", icon=":material/picture_as_pdf:", disabled=True, width="stretch", key=f"dl_pdf_off_{fmt}",
-                       help=(files.get("why") or "LibreOffice is not installed here")
-                       + ". The Word download has the same layout.")
+        row.button("PDF", icon=":material/picture_as_pdf:", disabled=True, width="content", key="dl_pdf_off",
+                   help=(files.get("why") or "LibreOffice is not installed here")
+                   + ". The Word download has the same layout.")
 
 
 def brief_page():
@@ -2508,38 +2550,39 @@ def brief_page():
                 "Monitor to choose them.")
     if st.button("Add more from Monitor", type="tertiary", key="more_from_monitor"):
         goto("monitor")
-    row = st.columns([2.6, 0.8, 0.8, 1.1], vertical_alignment="center")
-    with row[0]:
-        fmt = st.segmented_control("Write it as", list(fx.BRIEF_FORMATS), default="board",
-                                   format_func=fx.BRIEF_FORMATS.get, key="brief_fmt") or "board"
-        st.caption(FORMAT_HELP[fmt])
-    # The brief is written once per state of the data (and format): opening the page again reads it back.
+    # The brief is written once per state of the data: opening the page again reads it back.
     # Only new data, a changed pick of signals, or "Write again" calls the model.
-    fp = brief_fingerprint(fmt)
-    hit = None if st.session_state.pop("brief_redo", False) else app.store.cached("brief", fp)
+    fp = brief_fingerprint()
+    hit = app.store.cached("brief", fp)
     if not hit:
-        hit = write_brief_in_background(fmt, fp)
+        hit = write_brief_in_background(fp)
         if not hit:
             return  # the page polls until the brief is there; switching pages does not stop the writing
     brief, made = hit["data"], hit["ts"]
+    head = st.columns([3, 2], vertical_alignment="center")
+    head[0].caption("One brief for the board and the investment committee: London's key numbers, the evidence for "
+                    "the team's submarkets, and what supports the case or puts it at risk.")
+    row = head[1].container(horizontal=True, horizontal_alignment="right", gap="small", key="brief_actions")
     if brief.startswith("The brief could not be written"):
-        row[1].button("Word", disabled=True, width="stretch", key="dl_docx_off")
-        row[2].button("PDF", disabled=True, width="stretch", key="dl_pdf_off")
+        row.button("Word", disabled=True, width="content", key="dl_docx_off", icon=material("file-text"))
+        row.button("PDF", disabled=True, width="content", key="dl_pdf_off", icon=":material/picture_as_pdf:")
     else:
-        report_buttons(fmt, fp, brief, row[1], row[2])
-    deck_button(fmt, row[3])
-    deck_panel(fmt)
+        report_buttons(fp, brief, row)
+    deck_button(row)
+    deck_panel()
     with st.container(border=True):
         st.html(f'<div class="loa-cobrand">{brand_img("cobrand-nanfung.svg", "", "London Office Market Agent · Nan Fung Group")}'
-                f'<span>{esc(fx.BRIEF_FORMATS[fmt])}</span></div>')
+                '<span>Team brief</span></div>')
         state = st.columns([5, 1.2], vertical_alignment="center")
         state[0].html(f'<div class="loa-muted">Written {esc(when(made))} · the data has not changed since'
                       + ("" if hit else " (just now)") + "</div>")
         if state[1].button("Write again", key="brief_redo_btn", type="tertiary", icon=material("refresh-cw"),
                            help="Writes the brief again from the same data"):
-            st.session_state["brief_redo"] = True
+            st.session_state["brief_fresh"] = True
+            app.store.forget_cached("brief", fp)  # the next run writes it again, in the background as always
+            st.session_state.get("bg_jobs", {}).pop(fp, None)
             st.rerun()
-        st.markdown(re.sub(r"^(#{1,2}) ", lambda m: "#" * (len(m.group(1)) + 2) + " ", brief, flags=re.M))
+        st.markdown(re.sub(r"^(#{1,3}) ", lambda m: "#" * (len(m.group(1)) + 2) + " ", brief, flags=re.M))
         # the chart follows the first picked signal that has a metric; London vacancy when nothing is picked
         lead = next((it for it in items if it.get("metric")), None)
         market = (lead or {}).get("markets", ["London"])[0] if lead else "London"
@@ -2880,7 +2923,7 @@ def deal_card(d: dict, key: str = "lib", compact: bool = False):
         I.set_confidentiality(app.store, d["id"], "internal" if quot else "quotable", user)
         app.store.log("internal", user, f"marked our record for {d['property']} {'internal only' if quot else 'quotable'}")
         st.toast("Internal only. Filtered out of anything exported." if quot
-                 else "Can now be quoted in the IC paper and externally.")
+                 else "Can now be quoted in the team brief and externally.")
         st.rerun()
     if d.get("originals"):
         with c[2].popover(f"View originals ({len(d['originals'])})"):

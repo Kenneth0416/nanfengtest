@@ -5,11 +5,10 @@ it change what we do? Each slide makes one point; the title states it and the so
 
 ## Order
 
-Board (default): Cover · Occupiers (Two charts or Hero number on `vacancy_pct`) · Rents (Chart +
-takeaway on `rents`) · Capital markets (Chart + table: `investment`, `yields`) · Signal cards · Sources.
-
-IC: Cover · Occupiers · Title only with `evidence` · Capital markets · Signal cards (title states the case
-for and against) · Sources. Theme `data-white`.
+Team brief (one deck for the board and the investment committee): Cover · Occupiers (Two charts or Hero
+number on `vacancy_pct`) · Title only with `evidence` (the team's submarkets) · Rents (Chart + takeaway on
+`rents`) or Capital markets (Chart + table: `investment`, `yields`) · Signal cards (title states the case
+for and against) · Sources. Theme `navy-gold`; `data-white` when it is going to the committee on its own.
 
 Short on time or data: Cover · Signal cards · Sources is a valid three-slide deck.
 

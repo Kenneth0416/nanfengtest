@@ -73,7 +73,7 @@ def set_deal_confidentiality(ctx, args):
     d = I.set_confidentiality(ctx.store, d["id"], args["level"], ctx.role)
     ctx.store.log("internal", ctx.role, f"marked our record for {d['property']} {args['level']}")
     return {"summary": f"{d['property']} is now {I.LEVELS[d['confidentiality']]}"
-                       + (": it can be quoted in the IC paper and externally." if d["confidentiality"] == "quotable"
+                       + (": it can be quoted in the team brief and externally." if d["confidentiality"] == "quotable"
                           else ": filtered out of anything exported."), "data": d}
 
 
@@ -87,7 +87,7 @@ TOOLS = [
                      "limit": {"type": "integer"}}), list_our_deals),
     Tool("confirm_deal", "The recorder confirms an internal record is right.", obj_schema({"id": {"type": "integer"}}, ["id"]),
          confirm_deal, read_only=False),
-    Tool("set_deal_confidentiality", "Mark an internal record 'quotable' (may be cited externally and in the IC paper) "
+    Tool("set_deal_confidentiality", "Mark an internal record 'quotable' (may be cited externally and in the team brief) "
                                      "or 'internal' (never leaves the company).",
          obj_schema({"id": {"type": "integer"}, "level": {"type": "string", "enum": ["internal", "quotable"]}}, ["id", "level"]),
          set_deal_confidentiality, read_only=False),

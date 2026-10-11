@@ -1,3 +1,4 @@
+import hashlib
 import re
 from datetime import date
 
@@ -40,7 +41,7 @@ class Footnotes:
 
 def team_focus(config) -> dict:
     """The one view every team output uses (brief text, Word/PDF and slides): the team's default focus, never
-    the reader's own, so the same IC paper lists the same submarkets wherever it is read."""
+    the reader's own, so the brief lists the same submarkets wherever it is read."""
     focus = focus_mod.defaults(config)
     return {**focus, "markets": list(focus.get("markets") or tx.TOP_MARKETS[1:])}
 
@@ -66,12 +67,27 @@ def _signal(d: dict) -> Signal:
     return Signal(**d)
 
 
+def _figure(ctx, notes, market, metric):
+    """(value with its [n], short change, period label, flagged warning) for one figure, or None."""
+    snap = an.snapshot(ctx.store, market, metric)
+    if not snap:
+        return None
+    unit = tx.METRICS[metric]["unit"]
+    chg = f"{snap['change']:+.2f}{'pp' if unit == '%' else ''}" if snap["change"] is not None else ""
+    ref = an.source_ref(ctx.store, snap["source_id"])
+    flag = " (flagged)" if snap["status"] == "flagged" else ""
+    value = f"{tx.fmt_value(metric, snap['value'])}{flag} {notes.ref(ref['title'], ref['url'], snap['source_id'])}"
+    warn = f"{market} {tx.METRICS[metric]['label'].lower()}: {an.warning(snap)}" if flag else ""
+    return {"value": value, "change": chg, "period": an.period_label(snap["period"]),
+            "prev": an.period_label(snap["prev_period"]) if snap["change"] is not None else "", "warn": warn}
+
+
 def generate_brief(ctx, args):
-    """The team brief: signals people added on the Monitor page (or the top team signals if none),
-    written as a board summary or an IC paper section, every figure footnoted to its source."""
+    """The team brief, one document for the board and the investment committee alike: the signals people added
+    on the Monitor page (or the top team signals if none), London's key numbers, the evidence table for the
+    team's submarkets, what supports the case and what puts it at risk, quotable deals, every figure footnoted."""
     team = ctx.config.get("team", {})
     focus = team_focus(ctx.config)  # one team brief for everyone: the team's view, never the reader's own focus
-    fmt = args.get("format") or "board"
     items = ctx.store.brief_items()
     picked = bool(items)
     sigs = ([_signal(i) for i in items] if picked else SignalEngine(ctx.store, ctx.config).for_role("team"))
@@ -81,29 +97,33 @@ def generate_brief(ctx, args):
     notes = Footnotes(ctx.store)
     up = [s for s in sigs if s.tone == "positive"]
     down = [s for s in sigs if s.tone == "negative"]
+    other = [s for s in sigs if s not in up and s not in down]
 
-    if fmt == "ic":  # market evidence for the submarkets the person asking covers
-        markets = focus["markets"]
-        key = [(m, metric) for m in markets for metric in IC_METRICS]
-    else:
-        key = KEY_NUMBERS
     rows, seen, flagged = [], set(), []
-    for wanted, metric in key:
+    for wanted, metric in KEY_NUMBERS:
         market, _ = an.resolve_for_metric(ctx.store, wanted, metric)
-        snap = an.snapshot(ctx.store, market, metric) if (market, metric) not in seen else None
+        fig = _figure(ctx, notes, market, metric) if (market, metric) not in seen else None
         seen.add((market, metric))
-        if not snap:
+        if not fig:
             continue
-        chg = ""
-        if snap["change"] is not None:
-            unit = tx.METRICS[metric]["unit"]
-            chg = f"{snap['change']:+.2f}{'pp' if unit == '%' else ''} vs {an.period_label(snap['prev_period'])}"
-        ref = an.source_ref(ctx.store, snap["source_id"])
-        flag = " (flagged)" if snap["status"] == "flagged" else ""
-        rows.append(f"| {market} | {tx.METRICS[metric]['label']} | {tx.fmt_value(metric, snap['value'])}{flag} "
-                    f"{notes.ref(ref['title'], ref['url'], snap['source_id'])} | {an.period_label(snap['period'])} | {chg} |")
-        if flag:
-            flagged.append(f"{market} {tx.METRICS[metric]['label'].lower()}: {an.warning(snap)}")
+        chg = f"{fig['change']} vs {fig['prev']}" if fig["change"] else ""
+        rows.append(f"| {market} | {tx.METRICS[metric]['label']} | {fig['value']} | {fig['period']} | {chg} |")
+        flagged += [fig["warn"]] if fig["warn"] else []
+
+    # The evidence table: each of the team's submarkets on the measures an investment case rests on.
+    markets = focus["markets"]
+    evidence, periods = [], set()
+    for metric in IC_METRICS:
+        cells = []
+        for m in markets:
+            market, _ = an.resolve_for_metric(ctx.store, m, metric)
+            fig = _figure(ctx, notes, market, metric)
+            if fig:
+                periods.add(fig["period"])
+                flagged += [fig["warn"]] if fig["warn"] and fig["warn"] not in flagged else []
+            cells.append(f"{fig['value']}" + (f" ({fig['change']})" if fig["change"] else "") if fig else "n/a")
+        if any(c != "n/a" for c in cells):
+            evidence.append(f"| {tx.METRICS[metric]['label']} | " + " | ".join(cells) + " |")
 
     headline = " ".join(team_summary(ctx.store, sigs or SignalEngine(ctx.store, ctx.config).for_role("team"))) \
         or "No major changes this week."
@@ -112,17 +132,24 @@ def generate_brief(ctx, args):
         headline += " " + notes.ref(ref["title"], ref["url"], vac["source_id"])
     if ctx.llm and getattr(ctx.llm, "available", False) and sigs:
         facts = headline + "\n" + "\n".join(f"- {s.title}: {s.detail}" for s in sigs)
-        try:
-            headline = ctx.llm.complete(
-                f"Write a 3-sentence headline for a {'investment committee paper' if fmt == 'ic' else 'board'} "
-                f"on the London office market. Use ONLY these facts and numbers, no others:\n{facts}",
-                system="You are a CRE research analyst. Plain English, no hype, no headings or markdown. "
-                       "No coined words: write 'speculative schemes with no pre-lets', never 'unpre-let'.")
-            lines = [line.strip() for line in headline.strip().splitlines() if line.strip()]
-            prose = [line for line in lines if not line.startswith("#")]  # drop heading lines the model adds
-            headline = plain_words(" ".join(prose or [re.sub(r"^#+\s*", "", line) for line in lines]))
-        except Exception:
-            pass  # keep the rule-based headline
+        prompt = ("Write a 3-sentence headline for the team's weekly brief on the London office market, read by the "
+                  f"board and the investment committee. Use ONLY these facts and numbers, no others:\n{facts}")
+        system = ("You are a CRE research analyst. Plain English, no hype, no headings or markdown. "
+                  "No coined words: write 'speculative schemes with no pre-lets', never 'unpre-let'.")
+        # the same facts get the same headline: new code around the brief never asks the model again
+        key = hashlib.sha1(f"{getattr(ctx.llm, 'model', '')}|{system}|{prompt}".encode()).hexdigest()[:20]
+        hit = ctx.store.cached("headline", key) if not args.get("fresh") else None
+        if hit and hit.get("data"):
+            headline = hit["data"]
+        else:
+            try:
+                raw = ctx.llm.complete(prompt, system=system)
+                lines = [line.strip() for line in raw.strip().splitlines() if line.strip()]
+                prose = [line for line in lines if not line.startswith("#")]  # drop heading lines the model adds
+                headline = plain_words(" ".join(prose or [re.sub(r"^#+\s*", "", line) for line in lines]))
+                ctx.store.save_cached("headline", key, headline)
+            except Exception:
+                pass  # keep the rule-based headline
 
     def bullet(s):
         arrow = {"positive": "▲", "negative": "▼"}.get(s.tone, "●")
@@ -130,28 +157,33 @@ def generate_brief(ctx, args):
         warn = f" **{s.flag}**" if s.flag else ""
         return f"- {arrow} **{s.title}**. {s.detail} {refs}{warn} _{s.why}_"
 
-    title = "IC Paper - London Office Market Section" if fmt == "ic" else f"{team.get('name', 'Team')} - Weekly Brief"
+    title = f"{team.get('name', 'Team')} - Weekly Brief"
     who = sorted({i["added_by"] for i in items if i.get("added_by")})
     md = [f"# {title}", f"_{date.today():%d %b %Y} · "
           + (f"{len(sigs)} signals chosen by {', '.join(who)}_" if picked else "this week's top signals_"),
           "", "## Headline", headline, "", "## Key numbers", "| Market | Metric | Latest | Period | Change |",
-          "|---|---|---|---|---|", *rows,
-          *([""] + [f"_{f}_" for f in flagged] if flagged else []), ""]
-    if fmt == "ic":
-        md += ["## Supports the case", *([bullet(s) for s in up] or ["- Nothing new."]), "",
-               "## Risks to the case", *([bullet(s) for s in down] or ["- Nothing new."]), "",
-               "## Other context", *([bullet(s) for s in sigs if s not in up and s not in down] or ["- None."])]
-    else:
-        md += ["## What changed and why it matters", *([bullet(s) for s in sigs] or ["- Nothing new."])]
-    ours = I.for_brief(ctx.store, fmt)
+          "|---|---|---|---|---|", *rows, ""]
+    if evidence:
+        when = ", ".join(sorted(periods, key=lambda p: (p[-4:], p)))  # "Q1 2026", by year then quarter
+        md += ["## Submarket evidence", "| Metric | " + " | ".join(markets) + " |",
+               "|---|" + "---|" * len(markets), *evidence,
+               f"_Latest figure for each submarket ({when}); change against the previous quarter in brackets._", ""]
+    md += [f"_{f}_" for f in flagged] + ([""] if flagged else [])
+    md += ["## What changed and why it matters"]
+    if not sigs:
+        md += ["- Nothing new."]
+    for name, group in (("Supports the case", up), ("Risks to the case", down), ("Other context", other)):
+        if group:
+            md += ["", f"### {name}", *[bullet(s) for s in group]]
+    ours = I.for_brief(ctx.store)
     market = I.market_deals(ctx.store)
     if ours["ours"] or ours["filtered"] or market:
-        md += ["", "## Our deals (Internal)" if fmt != "ic" else "## Our deals (Internal, quotable only)"]
+        md += ["", "## Our deals (Internal, quotable only)"]
         md += [f"- **{I.one_line(d)}**" + (f" _{d['ext']['source']} reports {d['ext']['rent']}; our record stands._"
                                             if d.get("ext") and d["ext"].get("differs") else "")
-               + " [internal]" for d in ours["ours"]] or ["- None confirmed yet."]
+               + " [internal]" for d in ours["ours"]] or ["- None marked quotable yet."]
         if ours["filtered"]:
-            md.append(f"_{ours['filtered']} internal-only record(s) not included in the IC paper._")
+            md.append(f"_{ours['filtered']} internal-only record(s) not included._")
         md += ["", "## Market deals (Uploaded agency reports)"]
         md += [f"- {m['text']} ({an.period_label(m['period'])}) {notes.ref(m['title'], m['url'], m['source_id'])}"
                for m in market] or ["- None in the library for the latest period."]
@@ -169,7 +201,9 @@ def generate_brief(ctx, args):
     return {"summary": text, "data": {"markdown": text, "signals": [s.to_dict() for s in sigs]}}
 
 
-TOOLS = [Tool("generate_brief", "Write the team brief from the signals the team added (or the top team signals), "
-              "as a board summary or an IC paper section, with every figure footnoted to its source.",
-              obj_schema({"format": {"type": "string", "enum": ["board", "ic"]},
-                          "limit": {"type": "integer"}}), generate_brief)]
+TOOLS = [Tool("generate_brief", "Write the team brief from the signals the team added (or the top team signals): one "
+              "document for the board and the investment committee, with London's key numbers, the evidence table "
+              "for the team's submarkets, what supports the case and what puts it at risk, every figure footnoted.",
+              obj_schema({"limit": {"type": "integer"},
+                          "fresh": {"type": "boolean", "description": "write the headline again even if these "
+                                                                     "facts were written up before"}}), generate_brief)]

@@ -44,13 +44,13 @@ skills/brief_deck/
 |---|---|
 | `navy-gold` (default) | team weekly brief and board pack; same brand as the pitch deck |
 | `editorial-cream` | research note or commentary for a wider audience |
-| `data-white` | IC pack and dense analyst decks (the IC default) |
+| `data-white` | IC pack and dense analyst decks |
 | `charcoal-amber` | deal or strategy discussion shown on a screen; dark, few words |
 | `forest-cream` | client or owner market update |
 
 13 layouts: Cover, Section, Statement, Hero number, Stat row, Chart + takeaway, Two charts,
 Chart + table, Numbered pillars, Timeline, Signal cards, Sources, Title only. Chart keys `vacancy`,
-`take_up`, `rents`, `investment`; table keys `yields`, `evidence` (IC); hero metrics `vacancy_pct`,
+`take_up`, `rents`, `investment`; table keys `yields`, `evidence`; hero metrics `vacancy_pct`,
 `take_up_msqft`, `investment_gbp_bn`, `active_requirements_msqft`, `bank_rate`.
 
 ## How the storyline is chosen (agentic)
@@ -87,9 +87,9 @@ typed numbers, any number in the agent's text that the data does not hold is ref
 
 | Tool | Does |
 |---|---|
-| `brief_deck_data(format)` | the data above plus `stories`, the ranked candidates with reasons and suggested layouts |
+| `brief_deck_data()` | the data above plus `stories`, the ranked candidates with reasons and suggested layouts |
 | `brief_deck_guide(topic)` | `storyline`, `layouts`, `style`, `example`, `showcase`: the design notes the Copilot reads before writing a spec |
-| `build_brief_pptx(format, theme, spec, slides)` | builds `data/exports/<date>-team-brief-<format>.pptx`; `spec` is the storyline (each slide may carry `why`); without a spec the rule planner is used; `slides` = {key: {title, notes}} retitles that plan; returns `slides`, `theme`, `storyline` (`copilot` or `rules`), `why` per slide and the check's `problems` |
+| `build_brief_pptx(theme, spec, slides)` | builds `data/exports/<date>-team-brief.pptx`; `spec` is the storyline (each slide may carry `why`); without a spec the rule planner is used; `slides` = {key: {title, notes}} retitles that plan; returns `slides`, `theme`, `storyline` (`copilot` or `rules`), `why` per slide and the check's `problems` |
 
 A spec is `{"theme": ..., "slides": [{"layout", "eyebrow", "title", "so_what", "why", "notes", "fill": {...}}]}`.
 `fill` names placeholders; charts, tables and hero figures are keys (`{"chart": "vacancy"}`), never
@@ -115,7 +115,8 @@ in one message ("remove slide 3, then theme forest" / "刪第3頁，然後換森
 (by number, "this slide", "the last slide", "the rents slide", several pages at once), retitle, so-what,
 notes, add N slides or a topic or a statement at a position, shorten to N slides, chart range / markets
 / type, theme by name, colour or audience ("for a client update" → forest-cream), undo / restore version
-N, export questions, source questions and a format switch ("make an IC version"). Requests that would
+N, export questions and source questions; "make an IC version" says the deck already is one (one brief serves
+the board and the investment committee) and offers the data-white theme. Requests that would
 need invented data (a Midtown-only slide, a pipeline slide, a logo, a 47.3% that is not in the data) are
 answered, not faked. Every state of the deck is kept as a version (up to 20, each with its own files)
 so Undo and the version list in the header need no rebuild; the theme control in the header rebuilds an
@@ -123,26 +124,26 @@ edited deck on the new theme rather than planning it again.
 
 ## Three ways to build
 
-- **Team brief page**: the Slides panel above the brief. Pick a theme (each format remembers its own;
-  IC defaults to Data white), press **Build slides**, then **Download .pptx**. The Copilot plans the deck
+- **Team brief page**: the **Build slides** button beside Word and PDF. Pick a theme in the editor (Navy
+  gold by default), then **Download .pptx**. The Copilot plans the deck
   from the data; without a model the rule-picked fallback is used and labelled "Slides picked by rules
   (Copilot offline)". Changing the theme after a build hides the download until the deck is rebuilt, so
   the file you get is always the theme you see.
-- **CLI**: `python main.py brief --pptx [--ic] [--theme forest-cream] [--fixed]`; `--fixed` skips the
+- **CLI**: `python main.py brief --pptx [--theme forest-cream] [--fixed]`; `--fixed` skips the
   Copilot and uses the rule planner.
 - **Copilot chat**: "make the brief into slides", "a client update deck on the forest theme". It reads
   the data and the guide, writes the spec, builds, fixes anything the check reports, and replies with
   the file and one line per slide. When the Copilot is offline the same sentence still gets a deck: the
-  app reads the format and theme from it and builds the rule-picked version, with a download button
+  app reads the theme from it and builds the rule-picked version, with a download button
   and a note saying so.
 
 ## Samples (seed data)
 
-`docs/samples/team-brief-board-sample.pptx` (navy-gold), `team-brief-ic-sample.pptx` (data-white,
-evidence table, cards grouped as supports / risks) and `client-update-forest-cream-sample.pptx`
-(Statement, Stat row, Numbered pillars, Timeline), each with a PDF render. These were built on the
-rule-picked fallback (the build server has no model access); a sample from a real MiMo-planned run
-is to be added from the MiMo test thread.
+`docs/samples/team-brief-sample.pptx` (navy-gold, with the submarket evidence table and the cards
+grouped as supports / risks) and `client-update-forest-cream-sample.pptx` (Statement, Stat row,
+Numbered pillars, Timeline), each with a PDF render, built on the rule-picked fallback (the build
+server has no model access). `team-brief-board-copilot-sample` and `team-brief-ic-copilot-sample` are
+MiMo-planned decks from before the board and IC briefs became one.
 
 ## Limits
 

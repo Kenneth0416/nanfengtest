@@ -92,7 +92,7 @@ def test_agent_proposes_setup_and_applies_only_on_confirm(app):
     app.store.reset_focus(user)
     out = app.call("propose_setup", {"description": "I run acquisitions in Midtown and the City and present to the IC"}, user)
     p = out["data"]
-    assert p["focus"]["markets"] == ["Midtown", "City & Southbank"] and p["focus"]["brief_format"] == "ic"
+    assert p["focus"]["markets"] == ["Midtown", "City & Southbank"]
     assert "investment" in p["focus"]["measures"] and p["rules"]
     before, team_before = len(app.store.watch_rules(user)), len(app.store.watch_rules("team"))
     assert app.store.focus(user) is None  # nothing saved yet
@@ -116,8 +116,8 @@ def test_agent_proposes_setup_and_applies_only_on_confirm(app):
 def test_team_brief_uses_added_signals_with_footnotes(app):
     sig = SignalEngine(app.store, app.config).for_role("team")[0]
     app.store.add_to_brief(sig.to_dict(), "Kenneth")
-    md = app.call("generate_brief", {"format": "ic"}, "Kenneth")["summary"]
-    assert sig.title in md and "chosen by Kenneth" in md and "## Risks to the case" in md
+    md = app.call("generate_brief", {}, "Kenneth")["summary"]
+    assert sig.title in md and "chosen by Kenneth" in md and "## What changed and why it matters" in md and "## Submarket evidence" in md
     assert "[1]" in md and "## Sources" in md
     app.store.remove_from_brief(sig.id)
 
@@ -127,10 +127,10 @@ def test_brief_downloads_as_a_branded_research_note(app, tmp_path):
     key numbers as a table, three charts, every source numbered, and the important-information page."""
     from docx import Document
     from skills.market_brief import report
-    md = app.call("generate_brief", {"format": "board"}, "Kenneth")["summary"]
+    md = app.call("generate_brief", {}, "Kenneth")["summary"]
     b = report.parse(md)
     assert b.title and b.sources and b.numbers and b.headline
-    out = report.build(app.ctx, md, "board", tmp_path)
+    out = report.build(app.ctx, md, tmp_path)
     doc = Document(out["docx"])
     text = "\n".join(p.text for p in doc.paragraphs)
     cells = "\n".join(c.text for t in doc.tables for r in t.rows for c in r.cells)
@@ -145,7 +145,7 @@ def test_brief_downloads_as_a_branded_research_note(app, tmp_path):
     for el in doc.element.iter(*report._ORDER):  # Word refuses properties out of schema order
         ranks = [report._ORDER[el.tag].get(k.tag, 99) for k in el]
         assert ranks == sorted(ranks), el.tag
-    assert "WEEKLY BRIEF" in "".join(c.text for t in sec.header.tables for r in t.rows for c in r.cells)
+    assert "TEAM BRIEF" in "".join(c.text for t in sec.header.tables for r in t.rows for c in r.cells)
     if out["pdf"]:
         from pypdf import PdfReader
         pages = PdfReader(out["pdf"]).pages
@@ -204,7 +204,7 @@ def test_research_note_lays_out_whatever_the_brief_holds(tmp_path):
         "long": "# Brief\n\n## Headline\n" + "Vacancy " + "keeps falling across every submarket and quarter " * 30 + "[1].\n",
     }
     for name, md in cases.items():
-        out = report.build_docx(md, "ic" if name == "chinese" else "board", deck, tmp_path / f"{name}.docx")
+        out = report.build_docx(md, deck, tmp_path / f"{name}.docx")
         text, doc = _note_text(out)
         assert "Important information" in text and "Prepared for Nan Fung Group" in doc.sections[-1].footer.paragraphs[0].text
         for el in doc.element.iter(*report._ORDER):
@@ -230,13 +230,13 @@ def test_research_note_without_libreoffice_still_gives_word(app, tmp_path, monke
     from core import preview
     from skills.market_brief import report
     monkeypatch.setattr(preview, "available", lambda: {"soffice": False, "pdftoppm": False})
-    md = app.call("generate_brief", {"format": "ic"}, "Kenneth")["summary"]
-    out = report.build(app.ctx, md, "ic", tmp_path)
+    md = app.call("generate_brief", {}, "Kenneth")["summary"]
+    out = report.build(app.ctx, md, tmp_path)
     assert Path(out["docx"]).is_file() and out["pdf"] == "" and "LibreOffice" in out["why"]
     monkeypatch.setattr(report, "build_docx", lambda *a, **k: 1 / 0)  # a layout failure falls back to plain
-    out = report.build(app.ctx, md, "ic", tmp_path / "plain")
+    out = report.build(app.ctx, md, tmp_path / "plain")
     text, _ = _note_text(out["docx"])
-    assert "IC Paper" in text and "Not investment advice" in text
+    assert "Weekly Brief" in text and "Submarket evidence" in text and "Not investment advice" in text
 
 
 def test_ic_paper_lists_the_same_submarkets_in_text_word_and_slides(app, tmp_path):
@@ -249,15 +249,67 @@ def test_ic_paper_lists_the_same_submarkets_in_text_word_and_slides(app, tmp_pat
     app.store.reset_focus(user)
     app.call("update_focus", {"request": "only Canary Wharf"}, user)
     assert app.focus(user)["markets"] == ["Canary Wharf"]
-    md = app.call("generate_brief", {"format": "ic"}, user)["summary"]
+    md = app.call("generate_brief", {}, user)["summary"]
     team = team_focus(app.config)["markets"]
-    slides = [r["market"] for r in bd.deck_data(app.ctx, "ic")["evidence"]]
+    slides = [r["market"] for r in bd.deck_data(app.ctx)["evidence"]]
     assert slides == team and len(team) > 1
-    word, _ = _note_text(report.build(app.ctx, md, "ic", tmp_path)["docx"])
+    word, _ = _note_text(report.build(app.ctx, md, tmp_path)["docx"])
     for m in team:
         assert f"| {m} |" in md or any(line.startswith(f"| {m.split()[0]}") for line in md.splitlines())
         assert m in word
     app.store.reset_focus(user)
+
+
+def test_one_brief_serves_the_board_and_the_ic_and_asks_the_model_once(app, monkeypatch, tmp_path):
+    """Board summary and IC paper are one brief: London's key numbers, the team's submarket evidence, what
+    supports the case and what puts it at risk, quotable deals only. The model's headline is kept by its facts,
+    so new code around the brief (or the same week asked again) does not call the model twice; Write again does."""
+    from skills.market_brief import report
+    from skills.market_brief.tools import team_focus
+    calls = []
+
+    class Model:
+        available, model = True, "test-model"
+
+        def complete(self, prompt, system=""):
+            calls.append(prompt)
+            return "Vacancy fell to 8.0% [1]. Take-up beat the long-term average [1]. Rates held."
+    monkeypatch.setattr(app.ctx, "llm", Model())
+    md = app.call("generate_brief", {}, "Kenneth")["summary"]
+    for part in ("## Key numbers", "## Submarket evidence", "## What changed and why it matters",
+                 "### Risks to the case", "## Our deals (Internal, quotable only)", "## Sources"):
+        assert part in md, part
+    assert "IC paper" not in md and "board and the investment committee" in calls[0]
+    assert app.call("generate_brief", {}, "Kenneth")["summary"] == md and len(calls) == 1  # read back, not asked
+    app.call("generate_brief", {"fresh": True}, "Kenneth")
+    assert len(calls) == 2
+    b = report.parse(md)
+    assert any(h.startswith("What changed") for h, _ in b.sections)
+    assert not any(h.startswith(("Supports", "Risks")) for h, _ in b.sections)  # sub-headings stay in their section
+    text, doc = _note_text(report.build_docx(md, {}, tmp_path / "one.docx"))
+    assert "TEAM BRIEF" in text and "Submarket evidence" in text and "Risks to the case" in text
+    evidence = next(t for t in doc.tables if t.rows[0].cells[0].text == "METRIC")  # drawn as a table, not text
+    assert [c.text for c in evidence.rows[0].cells][1:] == [m.upper() for m in team_focus(app.config)["markets"]]
+    assert "long-term average." in text and "average ." not in text  # a reference leaves no space behind
+
+
+def test_two_identical_charts_on_one_page_do_not_collide():
+    """The same trend asked about twice in a conversation used to stop the page with StreamlitDuplicateElementId:
+    every chart now carries a key of its own, and app.py draws charts only through that path."""
+    from streamlit.testing.v1 import AppTest
+
+    def page(root):
+        import sys
+        sys.path.insert(0, root)
+        from core import charts
+        spec = {"type": "line", "title": "Vacancy", "x": ["Q1 2026", "Q2 2026"], "unit": "%",
+                "series": [{"name": "London", "values": [8.5, 8.0]}]}
+        for i in range(2):
+            charts.show(spec, key=f"chart-{i}-{charts.fingerprint(spec)}")
+    at = AppTest.from_function(page, args=(str(ROOT),), default_timeout=30)
+    at.run()
+    assert not at.exception and len(at.get("plotly_chart")) == 2
+    assert "st.plotly_chart(" not in (ROOT / "app.py").read_text()
 
 
 def test_without_pi_the_app_says_how_to_start_the_agent(app, monkeypatch, tmp_path):
@@ -414,7 +466,7 @@ def test_anyone_can_flag_a_number_and_it_carries_a_warning(app):
         sig = next(s for s in SignalEngine(app.store, app.config).all_signals() if s.obs_id == snap["rowid"])
         assert "Flagged by Sarah" in sig.flag
         assert "Flagged by Sarah" in get_metric_trend(app.ctx, {"market": "London", "metric": "vacancy_pct"})["summary"]
-        assert "(flagged)" in app.call("generate_brief", {"format": "board"}, "Sarah")["summary"]
+        assert "(flagged)" in app.call("generate_brief", {}, "Sarah")["summary"]
     finally:
         app.store.resolve_observation(snap["rowid"], "Sarah", keep=True)
     assert an.snapshot(app.store, "London", "vacancy_pct")["status"] == "ok"
@@ -516,6 +568,8 @@ def test_follow_source_checks_terms_and_picks_the_channel(app):
     assert agency["channel"] == "upload"
     assert follow.assess("https://down.example.com/", errors=["page: ConnectionError"])["channel"] == "upload"
     assert follow.resolve("Follow Savills Market Watch")["url"].startswith("https://www.savills.co.uk")
+    assert follow.resolve("Follow Savills Market Watch")["name"] == "Savills Market Watch"  # never "follow Follow …"
+    assert follow.resolve("please track https://example.com/feed Example research")["name"] == "Example research"
 
 
 def test_followed_sources_are_shared_and_remind_the_team(app, monkeypatch):
@@ -633,7 +687,7 @@ def test_summary_and_brief_lead_with_the_market_not_tips(app):
     sigs = SignalEngine(app.store, app.config).for_role("team")
     lines = team_summary(app.store, sigs)
     assert lines[0].startswith("Central London vacancy") and "Investment was" in lines[1]
-    md = app.call("generate_brief", {"format": "board"}, "Sarah")["summary"]
+    md = app.call("generate_brief", {}, "Sarah")["summary"]
     headline = md.split("## Headline\n")[1].split("\n")[0]
     assert "negative signals" not in headline and "Unverified" not in headline and "vacancy" in headline
     main = md.split("## What changed and why it matters")[1].split("## Market talk")[0]
@@ -745,7 +799,7 @@ def test_deck_preview_renders_pdf_and_slide_images(deck_app, tmp_path):
     """A built deck is rendered to a PDF and one PNG per slide for the Team brief page (needs LibreOffice and
     poppler; on a server without them the page shows the outline and the .pptx only)."""
     from core import preview
-    out = deck_app.call("build_brief_pptx", {"format": "board"}, "Kenneth")["data"]
+    out = deck_app.call("build_brief_pptx", {}, "Kenneth")["data"]
     have = preview.available()
     shown = preview.render(out["path"], tmp_path / "prev")
     if not have["soffice"]:
@@ -843,7 +897,7 @@ def test_brief_headline_has_no_heading_marks(app, monkeypatch):
     from core.summary import is_tip
     first = next(s for s in SignalEngine(app.store, app.config).for_role("team") if not is_tip(s))
     app.store.add_to_brief(first.to_dict(), "sam")
-    text = app.call("generate_brief", {"format": "ic"}, "sam")["summary"]
+    text = app.call("generate_brief", {}, "sam")["summary"]
     section = text.split("## Headline")[1].split("## Key numbers")[0]
     assert "#" not in section and "Leasing is strong and investment is not. Rates held." in section
 
@@ -862,7 +916,7 @@ def test_a_tip_saved_by_the_agent_is_still_unverified(app):
     for it in app.store.brief_items():   # earlier tests picked items; the tip must sort itself even when picked
         app.store.remove_from_brief(it["id"])
     app.store.add_to_brief(sig.to_dict(), "priya")
-    brief = app.call("generate_brief", {"format": "board"}, "priya")["summary"]
+    brief = app.call("generate_brief", {}, "priya")["summary"]
     assert "2 Finsbury" in brief.split("## Market talk")[1] and "2 Finsbury" not in brief.split("## Market talk")[0]
 
 
@@ -958,7 +1012,7 @@ def deck_app(app, tmp_path, monkeypatch):
 def test_brief_deck_opens_with_three_to_six_slides_and_the_cover_numbers(deck_app):
     from pptx import Presentation
     from core import analytics as an
-    out = deck_app.call("build_brief_pptx", {"format": "board"}, "Kenneth")
+    out = deck_app.call("build_brief_pptx", {}, "Kenneth")
     prs = Presentation(out["data"]["path"])
     assert 3 <= len(prs.slides) <= 6 and len(out["data"]["slides"]) == len(prs.slides)
     cover = _slide_text(prs.slides[0])
@@ -979,8 +1033,9 @@ def test_brief_deck_opens_with_three_to_six_slides_and_the_cover_numbers(deck_ap
         {"layout": "Cover", "title": "Deals", "why": "cover", "notes": "n", "fill": {"subtitle": "auto", "headline": "auto", "caveat": "auto", "kpis": "auto"}},
         {"layout": "Title only", "title": "Our deals and market deals", "why": "2 of our deals confirmed", "notes": "n", "fill": {"table": {"table": "deals"}}},
         {"layout": "Sources", "title": "Sources", "why": "s", "notes": "n", "fill": {"body": "auto"}}]}
-    deals = _slide_text(Presentation(deck_app.call("build_brief_pptx", {"format": "board", "spec": spec}, "k")["data"]["path"]).slides[1])
-    assert "8 Bishopsgate" in deals and "Internal" in deals and "Uploaded" in deals, "our deals listed apart from market deals"
+    deals = _slide_text(Presentation(deck_app.call("build_brief_pptx", {"spec": spec}, "k")["data"]["path"]).slides[1])
+    assert "25 Cabot Square" in deals and "Internal" in deals and "Uploaded" in deals, "our deals listed apart from market deals"
+    assert "8 Bishopsgate" not in deals, "an internal-only record never reaches the deck"
     assert "1 Triton Square, 4th floor" not in deals, "drafts never reach the deck"
     last = _slide_text(prs.slides[-1])
     assert "Bank of England Bank Rate" in last and "verify against the original" in last
@@ -988,10 +1043,10 @@ def test_brief_deck_opens_with_three_to_six_slides_and_the_cover_numbers(deck_ap
 
 
 def test_brief_deck_refuses_numbers_the_data_does_not_have(deck_app):
-    bad = deck_app.call("build_brief_pptx", {"format": "board", "slides": {"occupiers": {"title": "Vacancy collapses to 6.5%"}}}, "k")
+    bad = deck_app.call("build_brief_pptx", {"slides": {"occupiers": {"title": "Vacancy collapses to 6.5%"}}}, "k")
     assert "numbers not in the data: 6.5" in bad["summary"] and not bad["data"].get("path")
     assert not list((deck_app.root / "data" / "exports").glob("*.pptx")) or True  # nothing new written below
-    ok = deck_app.call("build_brief_pptx", {"format": "board", "slides": {"occupiers": {"title": "Vacancy fell to 8.0% in Q2 2026",
+    ok = deck_app.call("build_brief_pptx", {"slides": {"occupiers": {"title": "Vacancy fell to 8.0% in Q2 2026",
                                                                                          "notes": "Lowest since Q1 2024."}}}, "k")
     from pptx import Presentation
     prs = Presentation(ok["data"]["path"])
@@ -1011,7 +1066,7 @@ def test_brief_deck_shows_flags_and_keeps_market_talk_apart(deck_app):
     for s in real:
         deck_app.store.add_to_brief(s.to_dict(), "priya")
     try:
-        prs = Presentation(deck_app.call("build_brief_pptx", {"format": "board"}, "k")["data"]["path"])
+        prs = Presentation(deck_app.call("build_brief_pptx", {}, "k")["data"]["path"])
         assert "8.0% (flagged)" in _slide_text(prs.slides[0])
         assert "flagged figures, not yet checked" in _slide_text(prs.slides[-1]).lower()
         signals = _slide_text(prs.slides[4])
@@ -1024,7 +1079,7 @@ def test_brief_deck_shows_flags_and_keeps_market_talk_apart(deck_app):
 
 def test_ic_deck_has_evidence_table_and_two_columns(deck_app):
     from pptx import Presentation
-    prs = Presentation(deck_app.call("build_brief_pptx", {"format": "ic"}, "Kenneth")["data"]["path"])
+    prs = Presentation(deck_app.call("build_brief_pptx", {}, "Kenneth")["data"]["path"])
     assert 3 <= len(prs.slides) <= 6
     ev = next(sl for sl in prs.slides if "rent-free" in _slide_text(sl).lower())
     assert any(getattr(sh, "has_table", False) and sh.has_table for sh in ev.shapes)
@@ -1037,8 +1092,8 @@ def test_ic_deck_has_evidence_table_and_two_columns(deck_app):
 def test_copilot_builds_the_deck_with_the_scripted_model(deck_app, tmp_path):
     import json
     script = tmp_path / "deck.json"
-    script.write_text(json.dumps([{"tool": "brief_deck_data", "args": {"format": "board"}},
-                                  {"tool": "build_brief_pptx", "args": {"format": "board", "slides": {
+    script.write_text(json.dumps([{"tool": "brief_deck_data", "args": {}},
+                                  {"tool": "build_brief_pptx", "args": {"slides": {
                                       "occupiers": {"title": "Vacancy fell to 8.0%, the lowest since Q1 2024"}}}},
                                   {"text": "Slides built."}]))
     os.environ.update(PI_FAUX="1", PI_FAUX_SCRIPT=str(script), PI_STORE=str(tmp_path / "pi.sqlite"),
@@ -1058,11 +1113,12 @@ def test_every_house_theme_builds_a_clean_six_slide_deck(deck_app):
     from pptx import Presentation
     from skills.brief_deck import tools as bd
     for theme in bd.THEMES:
-        out = deck_app.call("build_brief_pptx", {"format": "board", "theme": theme}, "Kenneth")
+        out = deck_app.call("build_brief_pptx", {"theme": theme}, "Kenneth")
         assert out["data"]["theme"] == theme and out["data"]["problems"] == [], (theme, out["summary"])
         assert len(Presentation(out["data"]["path"]).slides) == 6
-    ic = deck_app.call("build_brief_pptx", {"format": "ic"}, "Kenneth")["data"]
-    assert ic["theme"] == "data-white" and ic["problems"] == []
+    one = deck_app.call("build_brief_pptx", {}, "Kenneth")["data"]  # one deck for the board and the IC
+    assert one["theme"] == "navy-gold" and one["problems"] == [] and any(s["title"].startswith("Market evidence")
+                                                                         for s in one["slides"])
 
 
 def test_the_copilot_can_write_its_own_storyline_with_the_new_layouts(deck_app):
@@ -1072,7 +1128,7 @@ def test_the_copilot_can_write_its_own_storyline_with_the_new_layouts(deck_app):
     guide = deck_app.call("brief_deck_guide", {"topic": "showcase"}, "k")
     spec = guide["data"]["spec"]
     assert [s["layout"] for s in spec["slides"]][1:5] == ["Statement", "Stat row", "Numbered pillars", "Timeline"]
-    out = deck_app.call("build_brief_pptx", {"format": "board", "spec": spec}, "k")
+    out = deck_app.call("build_brief_pptx", {"spec": spec}, "k")
     assert out["data"]["problems"] == [], out["summary"]
     prs = Presentation(out["data"]["path"])
     assert len(prs.slides) == 6 and [s.slide_layout.name for s in prs.slides] == [s["layout"] for s in spec["slides"]]
@@ -1091,7 +1147,7 @@ def test_the_copilot_can_write_its_own_storyline_with_the_new_layouts(deck_app):
         {"layout": "Signal cards", "eyebrow": "03 · Signals", "title": "What changed", "notes": "n",
          "fill": {"cards": "auto", "talk": "auto"}},
         {"layout": "Sources", "eyebrow": "Sources", "title": "Sources", "notes": "n", "fill": {"body": "auto"}}]}
-    out = deck_app.call("build_brief_pptx", {"format": "board", "spec": five}, "k")
+    out = deck_app.call("build_brief_pptx", {"spec": five}, "k")
     assert out["data"]["theme"] == "charcoal-amber" and out["data"]["problems"] == [], out["summary"]
     assert len(Presentation(out["data"]["path"]).slides) == 5
     assert set(bd.THEMES) == {"navy-gold", "editorial-cream", "data-white", "charcoal-amber", "forest-cream"}
@@ -1101,11 +1157,11 @@ def test_the_copilot_can_write_its_own_storyline_with_the_new_layouts(deck_app):
 def test_a_spec_is_refused_for_bad_theme_layout_count_or_number(deck_app):
     import copy
     from skills.brief_deck import tools as bd
-    base = bd.build_deck.default_spec(bd.deck_data(deck_app.ctx, "board"))
+    base = bd.build_deck.default_spec(bd.deck_data(deck_app.ctx))
     assert len(base["slides"]) == 6
 
     def refused(spec, want):
-        out = deck_app.call("build_brief_pptx", {"format": "board", "spec": spec}, "k")
+        out = deck_app.call("build_brief_pptx", {"spec": spec}, "k")
         assert not out["data"].get("path") and want in out["summary"], (want, out["summary"])
 
     bad = copy.deepcopy(base); bad["theme"] = "neon"
@@ -1195,19 +1251,19 @@ def test_a_photo_of_the_lease_is_read_by_the_vision_model_and_merged_into_the_dr
     app.seed_internal()
 
 
-def test_our_deals_stay_apart_from_market_deals_and_internal_only_never_reaches_the_ic_paper(app):
+def test_our_deals_stay_apart_from_market_deals_and_internal_only_never_reaches_the_brief(app):
+    """One brief goes to the board and the investment committee, so only quotable records are listed, and it
+    says how many internal-only ones were left out."""
     from core import internal as I
     deals = {d["property"]: d for d in app.store.internal_deals()}
     assert "8 Bishopsgate, 12th floor" in deals and deals["8 Bishopsgate, 12th floor"]["confidentiality"] == "internal"
-    board = app.call("generate_brief", {"format": "board"}, "Kenneth")["summary"]
-    ours = board.split("## Our deals")[1].split("## Market deals")[0]
-    market = board.split("## Market deals")[1].split("##")[0]
-    assert "8 Bishopsgate" in ours and "[internal]" in ours and "25 Cabot Square" in ours
+    brief = app.call("generate_brief", {}, "Kenneth")["summary"]
+    ours = brief.split("## Our deals")[1].split("## Market deals")[0]
+    market = brief.split("## Market deals")[1].split("##")[0]
+    assert "25 Cabot Square" in ours and "[internal]" in ours and "8 Bishopsgate" not in ours
+    assert "1 internal-only record(s) not included" in ours
     assert "1 Triton Square, 4th floor" not in ours, "a draft is never listed"
     assert "Anthropic" in market and "[" in market and "8 Bishopsgate" not in market
-    ic = app.call("generate_brief", {"format": "ic"}, "Kenneth")["summary"]
-    ic_ours = ic.split("## Our deals")[1].split("## Market deals")[0]
-    assert "25 Cabot Square" in ic_ours and "8 Bishopsgate" not in ic_ours and "1 internal-only record(s) not included" in ic_ours
     # the external comparison: a market deal in the same building with a different rent is noted, our record kept
     app.store.add_deal({"period": "2026Q3", "deal_type": "letting", "party": "Savills Market Watch Oct 2026 (test)",
                         "building": "25 Cabot Square, E14", "submarket": "Canary Wharf", "size_sqft": 9800, "rent_psf": 50.0,
@@ -1216,11 +1272,11 @@ def test_our_deals_stay_apart_from_market_deals_and_internal_only_never_reaches_
         d = I.record(app.store, {"property": "25 Cabot Square", "floor_area": "3rd floor", "date": "2026-09-18"}, "Priya", "said to Copilot")["deal"]
         assert d["ext"] and d["ext"]["differs"] and "£50.00 psf against our £52.00 psf" in d["ext"]["text"]
         assert d["rent"] == "£52.00 psf", "our record is kept"
-        md = app.call("generate_brief", {"format": "board"}, "Kenneth")["summary"]
+        md = app.call("generate_brief", {}, "Kenneth")["summary"]
         assert "reports £50.00 psf; our record stands" in md
-        # quoting toggle: marking it internal only removes it from the IC paper
+        # quoting toggle: marking it internal only removes it from the brief
         app.call("set_deal_confidentiality", {"id": d["id"], "level": "internal"}, "Priya")
-        ic = app.call("generate_brief", {"format": "ic"}, "Kenneth")["summary"]
+        ic = app.call("generate_brief", {}, "Kenneth")["summary"]
         assert "25 Cabot Square" not in ic.split("## Our deals")[1].split("## Market deals")[0]
         app.call("set_deal_confidentiality", {"id": d["id"], "level": "quotable"}, "Priya")
     finally:
@@ -1273,7 +1329,7 @@ def test_the_deck_storyline_follows_the_data_not_a_template(deck_app):
     from core import analytics as an
     from core.models import Observation
     from skills.brief_deck import planner, tools as bd
-    before = bd.deck_data(deck_app.ctx, "board")
+    before = bd.deck_data(deck_app.ctx)
     plan_a = planner.plan_spec(before, None, before["focus"], deck_app.store.watch_rules())
     keys_a = [(s["key"], s["layout"]) for s in plan_a["slides"]]
     assert ("occupiers", "Two charts") in keys_a and ("capital", "Chart + table") in keys_a
@@ -1281,7 +1337,7 @@ def test_the_deck_storyline_follows_the_data_not_a_template(deck_app):
     sid = an.snapshot(deck_app.store, "London", "investment_gbp_bn")["source_id"]
     deck_app.store.add_observations([Observation(period="2026Q3", market="London", metric="investment_gbp_bn", value=3.6, lta=3.0, source_id=sid, note="")])
     try:
-        after = bd.deck_data(deck_app.ctx, "board")
+        after = bd.deck_data(deck_app.ctx)
         plan_b = planner.plan_spec(after, None, after["focus"], deck_app.store.watch_rules())
         keys_b = [(s["key"], s["layout"]) for s in plan_b["slides"]]
         assert keys_b != keys_a
@@ -1290,7 +1346,7 @@ def test_the_deck_storyline_follows_the_data_not_a_template(deck_app):
         cap = next(s for s in plan_b["slides"] if s["key"] == "capital")
         assert "above the long-term average" in cap["why"] and "above the long-term average" in cap["title"]
         assert [c["reason"] for c in after["stories"]] != [c["reason"] for c in before["stories"]]
-        out = deck_app.call("build_brief_pptx", {"format": "board"}, "Kenneth")  # the fallback builds plan_b
+        out = deck_app.call("build_brief_pptx", {}, "Kenneth")  # the fallback builds plan_b
         assert out["data"]["problems"] == [] and [s["layout"] for s in out["data"]["slides"]] == [k[1] for k in keys_b]
         assert any("alert line" in w for w in out["data"]["why"])
     finally:
@@ -1314,14 +1370,14 @@ def test_copilot_plans_the_deck_and_every_slide_carries_its_why(deck_app, tmp_pa
          "fill": {"hero": {"metric": "vacancy_pct"}, "chart_label": "Vacancy", "chart": {"chart": "vacancy"}, "source": "See sources."}},
         {"layout": "Sources", "eyebrow": "Sources", "title": "Sources", "why": "Footnotes.", "notes": "n", "fill": {"body": "auto"}}]}
     script = tmp_path / "plan.json"
-    script.write_text(json.dumps([{"tool": "brief_deck_data", "args": {"format": "board"}},
-                                  {"tool": "build_brief_pptx", "args": {"format": "board", "spec": spec}},
+    script.write_text(json.dumps([{"tool": "brief_deck_data", "args": {}},
+                                  {"tool": "build_brief_pptx", "args": {"spec": spec}},
                                   {"text": "Three slides: cover; vacancy, because it is the lowest since Q1 2024; sources."}]))
     os.environ.update(PI_FAUX="1", PI_FAUX_SCRIPT=str(script), PI_STORE=str(tmp_path / "pi.sqlite"),
                       PI_CONVERSATIONS=str(tmp_path / "c.json"))
     try:
         from core.engine import Engine
-        built, ans = Engine(deck_app).build_deck("board", None, "Kenneth")
+        built, ans = Engine(deck_app).build_deck(None, "Kenneth")
     finally:
         os.environ.pop("PI_FAUX_SCRIPT", None)
     assert built and built["storyline"] == "copilot" and built["theme"] == "charcoal-amber" and built["problems"] == []
@@ -1336,9 +1392,9 @@ def test_copilot_plans_the_deck_and_every_slide_carries_its_why(deck_app, tmp_pa
 def test_a_sentence_asking_for_slides_is_understood_without_the_copilot():
     """When Pi is offline the app still turns "a deck on the forest theme" into a build, not a dead end."""
     from skills.brief_deck.tools import deck_request
-    assert deck_request("Build a client update deck on the forest theme") == ("board", "forest-cream")
-    assert deck_request("Make the brief into slides for Monday's meeting") == ("board", "navy-gold")
-    assert deck_request("A PowerPoint for the IC on Thursday") == ("ic", "data-white")
+    assert deck_request("Build a client update deck on the forest theme") == "forest-cream"
+    assert deck_request("Make the brief into slides for Monday's meeting") == "navy-gold"
+    assert deck_request("A PowerPoint for the IC on Thursday") == "navy-gold"  # one brief for the board and the IC
     assert deck_request("Compare Midtown and City Core") is None
 
 
@@ -1346,15 +1402,15 @@ def test_fewer_signals_leave_no_empty_card_frames_and_demand_is_not_a_repeat_of_
     from pptx import Presentation
     from skills.brief_deck import planner, tools as bd
     from skills.brief_deck.scripts import build_deck
-    d = bd.deck_data(deck_app.ctx, "board")
-    d["signals"] = d["signals"][:2]
+    d = bd.deck_data(deck_app.ctx)
+    d["signals"], d["evidence"] = d["signals"][:2], []  # room for the demand story beside the cover numbers
     spec = planner.plan_spec(d, "navy-gold", d["focus"], deck_app.store.watch_rules())
     demand = next((s for s in spec["slides"] if s["key"] == "demand"), None)
     assert demand and demand["layout"] == "Hero number" and demand["fill"]["hero"]["metric"] == "active_requirements_msqft"
     dd = {k: v for k, v in d.items() if k not in ("stories", "focus")}
     out = build_deck.build(dd, str(tmp_path / "two.pptx"), {k: v for k, v in spec.items() if k in ("theme", "slides")}, "navy-gold")
     prs = Presentation(out["path"])
-    cards = next(s for s in prs.slides if "What changed" in _slide_text(s))
+    cards = next(s for s in prs.slides if "supports the case" in _slide_text(s))
     rects = [sh for sh in cards.shapes if sh.shape_type == 1 and not sh.has_text_frame or (sh.has_text_frame and not sh.text_frame.text.strip() and sh.shape_type == 1)]
     assert len(rects) >= 6  # 2 tone edges + 4 covers over the unused frames
 
@@ -1368,8 +1424,8 @@ def test_a_cover_never_shows_empty_kpi_rules_or_placeholder_wording(deck_app, tm
     from pptx.util import Inches
     from skills.brief_deck import tools as bd
     from skills.brief_deck.scripts import build_deck, check_deck
-    d = bd.deck_data(deck_app.ctx, "board")  # deck_app has no brief items, so nothing is "chosen by" anyone
-    assert "none added yet" not in d["picked_by"] and "Board brief" in d["picked_by"] and d["date"] in d["picked_by"]
+    d = bd.deck_data(deck_app.ctx)  # deck_app has no brief items, so nothing is "chosen by" anyone
+    assert "none added yet" not in d["picked_by"] and "Team brief" in d["picked_by"] and d["date"] in d["picked_by"]
     d["signals"], d["talk"] = [], []
     dd = {k: v for k, v in d.items() if k not in ("stories", "focus")}
     # a Copilot-written cover: no kpis in fill, and the old placeholder wording in the subtitle and headline
@@ -1384,7 +1440,7 @@ def test_a_cover_never_shows_empty_kpi_rules_or_placeholder_wording(deck_app, tm
     cover = prs.slides[0]
     text = _slide_text(cover)
     assert "none added yet" not in text and "Top team signals" not in text
-    assert "Board brief" in text and d["date"] in text and d["title"] in text
+    assert "Team brief" in text and d["date"] in text and d["title"] in text
     assert not [sh for sh in cover.shapes if re.fullmatch(r"kpi rule \d", sh.name)], "no rules drawn for a cover without KPIs"
     assert any(sh.name == "kpi rule mask" for sh in cover.shapes), "the layout's four rules are masked"
     problems = check_deck.check(out["path"], dd)["problems"]
@@ -1456,7 +1512,7 @@ def test_check_deck_catches_a_wrapping_cover_title_and_an_empty_slide_and_the_bu
     problems = check_deck.check(str(sample))["problems"]
     assert any("wraps onto more lines" in p and "slide 1" in p for p in problems)
     assert any("nothing on the slide" in p and "slide 3" in p for p in problems)
-    d = bd.deck_data(deck_app.ctx, "ic")
+    d = bd.deck_data(deck_app.ctx)
     spec = planner.plan_spec(d, "data-white", d["focus"], deck_app.store.watch_rules())
     spec["slides"][0]["title"] = "IC section: vacancy fell to 8.0% while investment stayed 36% below its long-term average"
     dd = {k: v for k, v in d.items() if k not in ("stories", "focus")}
@@ -1586,7 +1642,7 @@ def test_brand_files_are_in_place_and_the_deck_carries_the_co_brand(deck_app):
         assert (brand / name).exists(), name
     assert b"<svg" in (brand / "nanfung/nanfung-logo-color.svg").read_bytes()[:400]
     assert "Nan Fung" in (brand / "README.md").read_text() and "trademark" in (brand / "README.md").read_text()
-    out = deck_app.call("build_brief_pptx", {"format": "board", "theme": "charcoal-amber"}, "Kenneth")
+    out = deck_app.call("build_brief_pptx", {"theme": "charcoal-amber"}, "Kenneth")
     prs = Presentation(out["data"]["path"])
     marks = [sh for sh in prs.slides[0].shapes if sh.name == "co-brand"]
     assert len(marks) == 1 and marks[0].shape_type == 13  # one picture
@@ -1642,9 +1698,9 @@ def test_team_activity_keeps_only_what_the_team_chose_to_share(app):
 
 def test_team_brief_is_the_same_for_every_reader(app):
     """One team brief: a reader's own focus never changes it."""
-    app.store.save_focus("priya", {"markets": ["Canary Wharf"], "measures": ["vacancy"], "budget": "3", "brief_format": "ic", "lens": "team"})
-    a = app.call("generate_brief", {"format": "board"}, "priya")["summary"]
-    b = app.call("generate_brief", {"format": "board"}, "Kenneth")["summary"]
+    app.store.save_focus("priya", {"markets": ["Canary Wharf"], "measures": ["vacancy"], "budget": "3", "lens": "team"})
+    a = app.call("generate_brief", {}, "priya")["summary"]
+    b = app.call("generate_brief", {}, "Kenneth")["summary"]
     assert a == b
     app.store.reset_focus("priya")
 
@@ -1665,11 +1721,11 @@ def test_slide_editor_edits_the_spec_by_instruction_and_rebuilds(deck_app, tmp_p
     retitle, add a story, theme) and the deck is built again from it; the cover and sources stay in place and a
     figure not in the data is still refused. Each page can be rendered on its own, so thumbnails appear one by one."""
     from core import deck_edit, preview
-    out = deck_app.call("build_brief_pptx", {"format": "board"}, "Kenneth")["data"]
+    out = deck_app.call("build_brief_pptx", {}, "Kenneth")["data"]
     spec = out["spec"]
     assert spec and len(spec["slides"]) == len(out["slides"]) and spec["slides"][0]["layout"] == "Cover"
     from skills.brief_deck import tools as bd
-    stories = bd.deck_data(deck_app.ctx, "board")["stories"]
+    stories = bd.deck_data(deck_app.ctx)["stories"]
     n = len(spec["slides"])
     new, said = deck_edit.apply("remove slide 3", spec, stories)
     assert len(new["slides"]) == n - 1 and "Removed slide 3" in said and new["slides"][0]["layout"] == "Cover"
@@ -1683,10 +1739,10 @@ def test_slide_editor_edits_the_spec_by_instruction_and_rebuilds(deck_app, tmp_p
     assert themed["theme"] == "forest-cream"
     assert deck_edit.apply("make it pink", spec, stories) == (None, deck_edit.HELP)
     # the revised spec builds; a made-up figure in a title is refused by the build, as before
-    built = deck_app.call("build_brief_pptx", {"format": "board", "theme": "navy-gold", "spec": titled}, "Kenneth")["data"]
+    built = deck_app.call("build_brief_pptx", {"theme": "navy-gold", "spec": titled}, "Kenneth")["data"]
     assert built.get("path") and [s["title"] for s in built["slides"]][1] == "Vacancy keeps falling"
     bad, _ = deck_edit.apply('retitle slide 2 "Vacancy fell to 12.7%"', spec, stories)
-    refused = deck_app.call("build_brief_pptx", {"format": "board", "spec": bad}, "Kenneth")
+    refused = deck_app.call("build_brief_pptx", {"spec": bad}, "Kenneth")
     assert refused["data"].get("error") and "12.7" in refused["data"]["error"]
     if not preview.available()["soffice"]:
         pytest.skip("LibreOffice not installed here")
@@ -1701,9 +1757,9 @@ def test_slide_editor_edits_the_spec_by_instruction_and_rebuilds(deck_app, tmp_p
 def test_the_copilot_edit_request_carries_the_current_spec():
     from core.engine import Engine
     spec = {"theme": "navy-gold", "slides": [{"layout": "Cover", "title": "T"}]}
-    ask = Engine.deck_edit_ask("board", "navy-gold", spec, "remove the deals slide")
+    ask = Engine.deck_edit_ask("navy-gold", spec, "remove the deals slide")
     assert '"layout": "Cover"' in ask and "remove the deals slide" in ask and "build_brief_pptx" in ask
-    assert "Build this week's team brief deck as a IC pack on the data-white theme" in Engine.deck_ask("ic", "data-white")
+    assert "one deck for the board and the investment committee on the data-white theme" in Engine.deck_ask("data-white")
 
 
 def test_the_rule_editor_handles_batches_pages_charts_undo_and_chinese(deck_app):
@@ -1713,8 +1769,8 @@ def test_the_rule_editor_handles_batches_pages_charts_undo_and_chinese(deck_app)
     targeted question, and 'add' requests that would invent data answered instead of faked."""
     from core import deck_edit as de
     from skills.brief_deck import tools as bd
-    spec = deck_app.call("build_brief_pptx", {"format": "board"}, "Kenneth")["data"]["spec"]
-    stories = bd.deck_data(deck_app.ctx, "board")["stories"]
+    spec = deck_app.call("build_brief_pptx", {}, "Kenneth")["data"]["spec"]
+    stories = bd.deck_data(deck_app.ctx)["stories"]
     ids = [s["id"] for s in spec["slides"]]
     assert all(ids) and len(set(ids)) == len(ids)
     n = len(spec["slides"])
@@ -1732,17 +1788,18 @@ def test_the_rule_editor_handles_batches_pages_charts_undo_and_chinese(deck_app)
     assert de.apply("撤銷上一步", spec, stories)[0] == {"undo": 1}
     assert de.apply("回到初版", spec, stories)[0] == {"undo": "first"}
     assert de.apply("restore version 2", spec, stories)[0] == {"undo": ("version", 2)}
-    assert de.apply("做一個 IC 版", spec, stories)[0] == {"switch": "ic"}
+    new, said = de.apply("做一個 IC 版", spec, stories)
+    assert new is None and "董事會和投委會共用" in said and "data-white" in said  # one brief: nothing to switch to
     assert "PDF" in de.apply("export as PDF", spec, stories)[1] and de.apply("make it 4:3", spec, stories)[0] is None
     # charts: range, markets, type, and a swap, all as parameters the painter reads
     new, said = de.apply("只顯示最近四季的空置率", spec, stories)
     chart = next(v for s in new["slides"] for v in (s.get("fill") or {}).values() if isinstance(v, dict) and v.get("chart") == "vacancy")
     assert chart["last"] == 4
-    new, _ = de.apply("only West End Core and City Core on slide 3", spec, stories)
-    assert next(v for v in new["slides"][2]["fill"].values() if isinstance(v, dict) and "chart" in v)["markets"] == ["West End Core", "City Core"]
+    new, _ = de.apply("only West End Core and City Core on slide 4", spec, stories)
+    assert next(v for v in new["slides"][3]["fill"].values() if isinstance(v, dict) and "chart" in v)["markets"] == ["West End Core", "City Core"]
     new, _ = de.apply("as a line chart on slide 2", spec, stories)
     assert any(v.get("type") == "line" for v in new["slides"][1]["fill"].values() if isinstance(v, dict))
-    built = deck_app.call("build_brief_pptx", {"format": "board", "spec": new}, "Kenneth")["data"]
+    built = deck_app.call("build_brief_pptx", {"spec": new}, "Kenneth")["data"]
     assert built.get("path")
     # shorten to N, 'this slide', vague, and adds that would invent data
     new, said = de.apply("精簡成 4 頁", spec, stories)
@@ -1753,24 +1810,24 @@ def test_the_rule_editor_handles_batches_pages_charts_undo_and_chinese(deck_app)
     assert de.apply("加一頁講 Midtown", spec, stories)[0] is None and "Midtown" in de.apply("加一頁講 Midtown", spec, stories)[1]
     assert "slide" in de.apply("Add a chart of yields", spec, stories)[1]
     new, said = de.apply("Add a statement slide saying vacancy hit 47.3%", spec, stories)
-    refused = deck_app.call("build_brief_pptx", {"format": "board", "spec": new}, "Kenneth")["data"]
+    refused = deck_app.call("build_brief_pptx", {"spec": new}, "Kenneth")["data"]
     assert refused.get("refused_numbers") and refused["refused_numbers"][0]["numbers"] == ["47.3"] and refused["latest"]["vacancy_pct"] == "8.0%"
     new, _ = de.apply('第2頁標題改成「空置率升到 9.9%」', spec, stories)
-    assert deck_app.call("build_brief_pptx", {"format": "board", "spec": new}, "Kenneth")["data"].get("refused_numbers")
+    assert deck_app.call("build_brief_pptx", {"spec": new}, "Kenneth")["data"].get("refused_numbers")
     new, _ = de.apply('第2頁標題改成「Q1 2024 空置率 9.9%」', spec, stories)
-    assert deck_app.call("build_brief_pptx", {"format": "board", "spec": new}, "Kenneth")["data"].get("path")  # a period names the past
+    assert deck_app.call("build_brief_pptx", {"spec": new}, "Kenneth")["data"].get("path")  # a period names the past
     new, said = de.apply("加一頁講利率，放在第 3 頁", spec, stories)
     assert new and new["slides"][2]["key"] == "macro" and "3. " in said
     assert de.apply("Use a theme suitable for a client update", spec, stories)[0]["theme"] == "forest-cream"
     assert "navy-gold" in de.apply("換成深藍色", spec, stories)[1]  # already on it
-    assert bd.deck_request("幫我把這週的 brief 做成 PPT，給投委會用") == ("ic", "data-white")
+    assert bd.deck_request("幫我把這週的 brief 做成 PPT，給投委會用") == "navy-gold"
     assert de.asks_removal("Make it shorter for the board, three minutes max") and not de.asks_removal("需要多兩頁")
 
 
 def test_the_copilot_edit_prompt_names_the_selected_slide_and_keeps_ids():
     from core.engine import Engine
     spec = {"theme": "navy-gold", "slides": [{"layout": "Cover", "title": "T", "id": "s1"}, {"layout": "Statement", "title": "U", "id": "s2"}]}
-    ask = Engine.deck_edit_ask("board", "navy-gold", spec, "this slide is wrong", sel=2)
+    ask = Engine.deck_edit_ask("navy-gold", spec, "this slide is wrong", sel=2)
     assert "looking at slide 2 (id s2)" in ask and "Keep every slide's `id`" in ask and "`last`" in ask
 
 

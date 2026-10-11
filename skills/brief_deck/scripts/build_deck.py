@@ -70,10 +70,9 @@ COVER_PLACEHOLDER = re.compile(r"none added yet|top team signals|\(none\)|no sig
                                re.I)
 
 
-def cover_line(fmt: str, date: str, period: str = "") -> str:
-    """The cover's fallback subtitle: the brief's format and period, e.g. "Board brief · figures to Q2 2026 · 10 Oct 2026"."""
-    kind = "Investment committee paper" if fmt == "ic" else "Board brief"
-    return "  ·  ".join(x for x in (kind, f"figures to {period}" if period else "", date) if x)
+def cover_line(date: str, period: str = "") -> str:
+    """The cover's fallback subtitle: what it is and its period, e.g. "Team brief · figures to Q2 2026 · 10 Oct 2026"."""
+    return "  ·  ".join(x for x in ("Team brief", f"figures to {period}" if period else "", date) if x)
 
 
 def clean_cover_text(v, fallback: str):
@@ -465,12 +464,12 @@ class Painter:
                 m = d["macro"]
                 rows.append(("Bank Rate", f"{m['text']} {m['ref']}", f"as of {m['as_of']}"))
             widths = (1.9, 1.3, 1.33)
-        else:  # evidence: IC paper, submarket x metric
+        else:  # evidence: the team's submarkets x the investment-case metrics
             ev = d.get("evidence") or []
             head = ["SUBMARKET"] + [cl["label"].upper() for cl in ev[0]["cells"]] if ev else ["SUBMARKET"]
             rows = [tuple(head)] + [tuple([r["market"]] + [cl["text"] for cl in r["cells"]]) for r in ev]
             widths = None
-        if key == "deals":  # our deals (internal, confirmed, quotable only in an IC pack) above market deals (uploaded)
+        if key == "deals":  # our deals (internal, confirmed, quotable only) above market deals (uploaded)
             rows = [("DEAL", "TENANT", "RENT", "TERM", "RENT-FREE", "WHEN", "SOURCE")]
             rows += [(x["property"], x["tenant"], x["rent"] or "-", x["term"] or "-", x["rent_free"] or "-", x["date"] or "-",
                       "Internal" + (", quotable" if x["level"] == "quotable" else " only")) for x in d.get("our_deals") or []]
@@ -583,20 +582,16 @@ class Painter:
             dot.line.color.rgb, dot.line.width = rgb(c["accent"]), Pt(1.5)
 
     def tone(self, t):
-        """Mark, kicker word and colour for a card. IC packs read the cards as the case for and against."""
+        """Mark, kicker word and colour for a card: the cards read as the case for and against."""
         c = self.c
-        ic = self.d.get("format") == "ic"
-        return {"positive": ("▲", "SUPPORTS THE CASE" if ic else "POSITIVE", c["good"]),
-                "negative": ("▼", "RISKS TO THE CASE" if ic else "NEGATIVE", c["bad"])}.get(
+        return {"positive": ("▲", "SUPPORTS THE CASE", c["good"]),
+                "negative": ("▼", "RISKS TO THE CASE", c["bad"])}.get(
             t, ("●", "CONTEXT", c["neutral"]))
 
     def cards(self):
-        """Up to six signal cards; an IC pack groups what supports the case before what puts it at risk."""
-        cards = self.d["signals"][:6]
-        if self.d.get("format") == "ic":
-            rank = {"positive": 0, "negative": 1}
-            cards = sorted(cards, key=lambda cd: rank.get(cd["tone"], 2))
-        return cards
+        """Up to six signal cards, what supports the case before what puts it at risk, as in the written brief."""
+        rank = {"positive": 0, "negative": 1}
+        return sorted(self.d["signals"][:6], key=lambda cd: rank.get(cd["tone"], 2))
 
     def card(self, cd):
         c = self.c
@@ -693,9 +688,9 @@ class Painter:
 
 # ----------------------------------------------------------------------------- default storyline
 def default_spec(d: dict, theme: str | None = None) -> dict:
-    """The board storyline (references/storyline.md) with rule-based titles, so the brief exports without
-    an agent. IC uses the data-white theme and swaps rents for the evidence table."""
-    theme = theme or ("data-white" if d["format"] == "ic" else DEFAULT_THEME)
+    """The storyline (references/storyline.md) with rule-based titles, so the brief exports without an agent:
+    occupiers, the submarket evidence table, rents, capital markets, deals, signals and sources, kept to six."""
+    theme = theme or DEFAULT_THEME
     k = {x["metric"]: x for x in d["kpis"]}
     slides = [{"key": "cover", "layout": "Cover", "eyebrow": "LONDON OFFICE MARKET  ·  " + d["date"].upper(),
                "title": d["title"], "notes": "Headline: " + " ".join(d["headline"]),
@@ -720,12 +715,13 @@ def default_spec(d: dict, theme: str | None = None) -> dict:
                                 "right_chart": {"chart": "take_up"},
                                 "source": f"Source {d['vacancy'][-1]['ref']}. Quarters with no figures in the "
                                           "library are not shown."}})
-    if d["format"] == "ic" and d.get("evidence"):
+    if d.get("evidence"):
         n += 1
         slides.append({"key": "evidence", "layout": "Title only", "eyebrow": f"{n:02d}  ·  MARKET EVIDENCE",
-                       "title": "Market evidence for the submarkets in focus",
-                       "notes": "Evidence table for the IC paper.", "fill": {"table": {"table": "evidence"}}})
-    elif d["rents"]:
+                       "title": "Market evidence for the team's submarkets",
+                       "notes": "The submarket evidence table, as in the written brief.",
+                       "fill": {"table": {"table": "evidence"}}})
+    if d["rents"]:
         n += 1
         top = d["rents"][0]
         core = ("West End Core", "City Core", "Canary Wharf")
@@ -770,7 +766,7 @@ def default_spec(d: dict, theme: str | None = None) -> dict:
         ours = d.get("our_deals") or []
         t = (f"Our deals and market deals: {len(ours)} of ours, listed apart from the market" if ours
              else "Market deals; our records are internal only and not shown")
-        note = f"{d['deals_filtered']} internal-only record(s) left out of the IC pack. " if d.get("deals_filtered") else ""
+        note = f"{d['deals_filtered']} internal-only record(s) left out of the brief. " if d.get("deals_filtered") else ""
         slides.append({"key": "deals", "layout": "Title only", "eyebrow": f"{n:02d}  ·  DEALS",
                        "title": t, "so_what": next((x["ext"] for x in ours if x.get("ext")), ""),
                        "notes": note + "Our deals are internal: " + ("; ".join(f"{x['property']} {x['rent']}" for x in ours) or "none")
@@ -778,8 +774,7 @@ def default_spec(d: dict, theme: str | None = None) -> dict:
                        "fill": {"table": {"table": "deals"}}})
     n += 1
     slides.append({"key": "signals", "layout": "Signal cards", "eyebrow": f"{n:02d}  ·  WHAT CHANGED",
-                   "title": ("What supports the case, and what puts it at risk" if d["format"] == "ic"
-                             else "What changed this week and why it matters"),
+                   "title": "What supports the case, and what puts it at risk",
                    "notes": "\n".join(f"- {c['title']}: {c['detail']} {c['refs']}" for c in d["signals"]),
                    "fill": {"cards": "auto", "talk": "auto"}})
     slides.append({"key": "sources", "layout": "Sources", "eyebrow": "SOURCES", "title": "Sources and caveats",
@@ -829,8 +824,8 @@ def build(d: dict, out: str | Path, spec: dict | None = None, theme: str | None 
         phs = {name: present[idx] for name, idx in by_name.items() if idx in present}
         fill = {k: (auto[k] if v == "auto" and k in auto else v) for k, v in (s.get("fill") or {}).items()}
         fill = {k: ({k: v} if k in ("table", "chart") and isinstance(v, str) else v) for k, v in fill.items()}
-        if s["layout"] == "Cover":  # no internal or placeholder wording on a cover: the brief's format and period instead
-            line = cover_line(d.get("format", "board"), d.get("date", ""), (d.get("kpis") or [{}])[0].get("period", ""))
+        if s["layout"] == "Cover":  # no internal or placeholder wording on a cover: what it is and its period instead
+            line = cover_line(d.get("date", ""), (d.get("kpis") or [{}])[0].get("period", ""))
             s = {**s, "title": clean_cover_text(s.get("title", ""), d.get("title", ""))}
             for k in ("subtitle", "headline", "caveat"):
                 if k in fill:

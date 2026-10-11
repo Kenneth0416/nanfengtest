@@ -14,4 +14,4 @@ the same property and floor is merged into it, not added as a second record.
 - `confirm_deal` when the person who recorded it says it is right; `set_deal_confidentiality` when
   someone says a record may be quoted externally (quotable) or must stay internal.
 - Internal records are confidential: in any answer label them Internal only (or quotable) in words, never
-  present them as market evidence, and never include an internal-only record in an IC paper.
+  present them as market evidence, and never include an internal-only record in the team brief.

@@ -190,10 +190,18 @@ def _theme_for(text: str) -> str | None:
     return None
 
 
+def _one_brief(zh: bool) -> str:
+    return (lambda en, cn: cn if zh else en)("There is one team brief for the board and the investment committee: this deck already carries the "
+             "submarket evidence table and what supports the case and what puts it at risk. For a committee look, "
+             "ask for the data-white theme.",
+             "現在只有一份團隊簡報，董事會和投委會共用：這套投影片已包含子市場證據表，以及支持與風險兩邊的訊號。"
+             "想要投委會常用的風格，可以說「換成 data-white 主題」。")
+
+
 def apply(instruction: str, spec: dict, stories: list[dict] | None = None, sel: int | None = None) -> tuple[dict | None, str]:
     """(revised spec, what was done) or (None, why not / a question / an answer). Several instructions in one
     sentence are applied in turn and reported one by one. Special results: {"undo": n|"first"} to go back a
-    version, {"switch": "ic"|"board"} to rebuild in another format. Never changes `spec` in place."""
+    version. Never changes `spec` in place."""
     parts = [p for p in _SPLIT.split(instruction.strip()) if p.strip()]
     if len(parts) <= 1:
         return _apply_one(instruction, spec, stories, sel)
@@ -201,7 +209,7 @@ def apply(instruction: str, spec: dict, stories: list[dict] | None = None, sel: 
     zh = is_zh(instruction)
     for p in parts:
         new, said = _apply_one(p, cur, stories, sel)
-        if isinstance(new, dict) and ("undo" in new or "switch" in new):
+        if isinstance(new, dict) and "undo" in new:
             return new, said
         if new:
             cur, changed = new, True
@@ -254,9 +262,9 @@ def _apply_one(instruction: str, spec: dict, stories: list[dict] | None, sel: in
     if re.search(r"4\s*[:：]\s*3|\bsquare\b|直式|portrait", low):
         return None, T("Only 16:9 is available: the five house templates are widescreen.", "只有 16:9：五個房屋主題模板都是寬螢幕。")
     if re.search(r"\b(ic|investment committee) (version|pack|format)\b|\bmake (it |an? )?ic\b|\bfor the ic\b", low) or re.search(r"(投委會|投委会|IC)\s*版|做一個\s*IC|做成\s*IC", t):
-        return {"switch": "ic"}, T("Switching to the IC pack (data-white) and building it from the same data.", "改成投委會版（data-white），用同一份資料建置。")
+        return None, _one_brief(zh)
     if re.search(r"\bboard (version|pack|format)\b", low) or re.search(r"(董事會|董事会|board)\s*版", t):
-        return {"switch": "board"}, T("Switching to the board pack and building it from the same data.", "改成董事會版，用同一份資料建置。")
+        return None, _one_brief(zh)
     # --- questions about the deck ----------------------------------------------------------------------
     if re.search(r"\b(where|which).*(from|source|come)\b|\bsource of\b", low) or re.search(r"從哪|从哪|來源|来源|出處|出处|哪裡來|哪里来", t):
         i = _find(spec, t, sel) or sel

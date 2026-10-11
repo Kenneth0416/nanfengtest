@@ -299,10 +299,11 @@ def market_deals(store, limit: int = 5) -> list[dict]:
     return out
 
 
-def for_brief(store, fmt: str) -> dict:
-    """Confirmed records for the brief; the IC paper gets only quotable ones and says how many were left out."""
+def for_brief(store) -> dict:
+    """Confirmed records for the team brief: only quotable ones, since the brief may go to the investment
+    committee; it says how many internal-only records were left out."""
     done = [d for d in store.internal_deals() if d.get("status") == "confirmed"]
-    ours = [d for d in done if fmt != "ic" or d.get("confidentiality") == "quotable"]
+    ours = [d for d in done if d.get("confidentiality") == "quotable"]
     return {"ours": ours, "filtered": len(done) - len(ours)}
 
 

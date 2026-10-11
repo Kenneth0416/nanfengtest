@@ -31,7 +31,7 @@ def propose_setup(ctx, args):
     lines = ["**Proposed setup** (nothing is saved until you apply it)",
              f"- Submarkets: {', '.join(f['markets']) or 'all of London'}",
              f"- Measures: {', '.join(focus_mod.MEASURES[m] for m in f['measures'])}",
-             f"- Home: {focus_mod.BUDGETS[f['budget']]} · Brief: {focus_mod.BRIEF_FORMATS[f['brief_format']]}",
+             f"- Home: {focus_mod.BUDGETS[f['budget']]}",
              *[f"- Alert: {r['label']} ({r['why']})" for r in p["rules"]]]
     return {"summary": "\n".join(lines), "data": p}
 

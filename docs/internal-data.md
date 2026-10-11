@@ -51,9 +51,9 @@ A match fills empty fields only, never overwrites, and adds the contributor to `
 
 ## 4. Inside and outside, never mixed
 
-- Team brief (markdown and deck): "Our deals (Internal)" then "Market deals (Uploaded agency reports)", each
-  item footnoted. Draft records are not listed.
-- IC paper section: only `quotable` records, with a line "n internal-only records not included".
+- Team brief (markdown, Word/PDF and deck): "Our deals (Internal, quotable only)" then "Market deals (Uploaded
+  agency reports)", each item footnoted. Only confirmed `quotable` records are listed, with a line "n internal-only
+  records not included", because the same brief may go to the investment committee. Draft records are not listed.
 - External comparison: when a market deal in the library names the same building with a rent, the
   record shows "Also reported externally: <source> shows £70.00 psf against our £72.50; our record is
   kept, difference noted for the brief", and the brief repeats it in italics.

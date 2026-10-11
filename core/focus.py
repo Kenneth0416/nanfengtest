@@ -15,7 +15,6 @@ MEASURES = {
     "macro": "Macro", "data_quality": "Data checks",
 }
 BUDGETS = {"3": "3 signals (2 min)", "5": "5 signals (5 min)", "all": "Everything"}
-BRIEF_FORMATS = {"board": "Board summary", "ic": "IC paper section"}
 
 # A lens is a focus template: it only changes ranking weights and the "for you" line on each card.
 LENSES = {"team": "Whole team", "investor": "Investment", "asset_manager": "Asset management",
@@ -102,8 +101,7 @@ def _is_within(child: str, parent: str) -> bool:
 def defaults(config: dict, user: str = "team") -> dict:
     preset = config.get("team", {}).get("focus", {})
     return {"markets": list(preset.get("markets", [])), "measures": list(preset.get("measures", MEASURES)),
-            "budget": str(preset.get("budget", "5")), "brief_format": preset.get("brief_format", "board"),
-            "lens": preset.get("lens", "team")}
+            "budget": str(preset.get("budget", "5")), "lens": preset.get("lens", "team")}
 
 
 def for_you(s, lens: str) -> str:
@@ -130,10 +128,6 @@ def parse_command(text: str) -> list[tuple[str, str, str]] | None:
         changes.append(("set", "budget", "3"))
     elif re.search(r"\b(show|give) me (everything|all signals)\b|\ball signals\b", t, re.I):
         changes.append(("set", "budget", "all"))
-    if re.search(r"\b(ic|investment committee) (format|style|brief)\b", t, re.I):
-        changes.append(("set", "brief_format", "ic"))
-    elif re.search(r"\bboard (format|style|brief|summary)\b", t, re.I):
-        changes.append(("set", "brief_format", "board"))
     parts = _VERB_RE.split(t)
     for i in range(1, len(parts) - 1, 2):
         verb = parts[i].lower()
@@ -149,7 +143,7 @@ def parse_command(text: str) -> list[tuple[str, str, str]] | None:
 def apply(focus: dict, changes: list[tuple[str, str, str]]) -> dict:
     new = {**focus, "markets": list(focus["markets"]), "measures": list(focus["measures"])}
     for action, field, value in changes:
-        if field in ("budget", "brief_format"):
+        if field == "budget":
             new[field] = value
             continue
         key = "markets" if field == "market" else "measures"
@@ -168,8 +162,6 @@ def describe(changes) -> str:
     for action, field, value in changes:
         if field == "budget":
             out.append(f"Home shows {BUDGETS[value].lower()}")
-        elif field == "brief_format":
-            out.append(f"Brief format: {BRIEF_FORMATS[value]}")
         else:
             out.append(f"{words[action]} {MEASURES.get(value, value) if field == 'measure' else value}")
     return "; ".join(dict.fromkeys(out))
@@ -204,16 +196,14 @@ def propose(description: str, store=None, llm=None) -> dict:
         budget = "all"
     else:
         budget = "5"
-    brief = "ic" if re.search(r"\bic\b|investment committee|acqui|underwrit", t) else "board"
     lens = next((k for k, p in (("asset_manager", r"\bmanag\w*|landlord|buildings?\b|offices? in\b|portfolio|tenant"),
                                 ("investor", r"acqui|invest|buy|underwrit|ic\b|committee"),
                                 ("analyst", r"research|analyst|data"),
                                 ("executive", r"board|ceo|\bhead\b|director|leadership")) if re.search(p, t)), "team")
     reasons = [f"Measures from what you said you do: {', '.join(MEASURES[m] for m in measures)}.",
                f"Submarkets you named: {', '.join(markets)}." if markets else "You named no submarkets, so all of London.",
-               f"Home shows {BUDGETS[budget].lower()}; brief as {BRIEF_FORMATS[brief].lower()}."]
-    proposal = {"focus": {"markets": markets, "measures": measures, "budget": budget, "brief_format": brief,
-                          "lens": lens},
+               f"Home shows {BUDGETS[budget].lower()}."]
+    proposal = {"focus": {"markets": markets, "measures": measures, "budget": budget, "lens": lens},
                 "rules": _suggest_rules(store, markets, measures) if store else [], "reasons": reasons,
                 "made_by": "rules"}
     if llm is not None and getattr(llm, "available", False):
@@ -246,15 +236,14 @@ def _refine_with_llm(llm, description, proposal) -> dict:
     try:
         out = llm.complete_json(
             "A London office market user described their job. Adjust this draft setup to fit them. Return JSON with "
-            "keys markets, measures, budget, brief_format, reasons (list of short strings). "
+            "keys markets, measures, budget, reasons (list of short strings). "
             f"Allowed markets: {list(tx.MARKET_PARENT)}. Allowed measures: {list(MEASURES)}. "
-            f"budget one of {list(BUDGETS)}; brief_format one of {list(BRIEF_FORMATS)}.\n"
+            f"budget one of {list(BUDGETS)}.\n"
             f"Job: {description}\nDraft: {proposal['focus']}")
         f = {"markets": [m for m in out.get("markets", []) if m in tx.MARKET_PARENT and m != "London"],
              "measures": [m for m in out.get("measures", []) if m in MEASURES] or proposal["focus"]["measures"],
              "budget": out.get("budget") if out.get("budget") in BUDGETS else proposal["focus"]["budget"],
-             "brief_format": out.get("brief_format") if out.get("brief_format") in BRIEF_FORMATS
-             else proposal["focus"]["brief_format"], "lens": proposal["focus"]["lens"]}
+             "lens": proposal["focus"]["lens"]}
         return {**proposal, "focus": f, "reasons": out.get("reasons") or proposal["reasons"], "made_by": "llm"}
     except Exception:
         return proposal
