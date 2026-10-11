@@ -132,8 +132,12 @@ PAGE_CSS = r"""
 /* ---- Copilot page: a centred 760px thread between a fixed top bar and the fixed chat box (ChatGPT's three bands) */
 body:has(.loa-cp-page) [data-testid="stMainBlockContainer"] { max-width:808px; margin:0 auto; padding-top:8px; padding-bottom:8px; }
 body:has(.loa-cp-page) [data-testid="stBottomBlockContainer"] { max-width:808px; margin:0 auto; padding-top:8px; }
-body:has(.loa-cp-page) header[data-testid="stHeader"] { background:transparent; pointer-events:none; }
-body:has(.loa-cp-page) header[data-testid="stHeader"] * { pointer-events:auto; }
+/* Streamlit's own top strip is gone on every page: no Deploy, no three-dot menu, no running-man; the header is
+   see-through and only its sidebar-expand button still takes clicks */
+header[data-testid="stHeader"] { background:transparent; pointer-events:none; box-shadow:none; }
+header[data-testid="stHeader"] * { pointer-events:auto; }
+[data-testid="stToolbarActions"], [data-testid="stMainMenu"], [data-testid="stDecoration"], [data-testid="stStatusWidget"]
+  { display:none !important; }  /* stToolbar itself stays: it holds the sidebar-expand button */
 body:has(.loa-cp-page) .loa-notice { margin:0 0 4px 0; }
 body:has(.loa-cp-page) [data-testid="stBottomBlockContainer"]::after, div[data-testid="stDialog"] .stElementContainer:has(> .stChatInput)::after
   { content:"Copilot can be wrong. Every number links to its source; check the ones marked \26A0.";
