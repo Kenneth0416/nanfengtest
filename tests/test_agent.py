@@ -239,6 +239,27 @@ def test_research_note_without_libreoffice_still_gives_word(app, tmp_path, monke
     assert "IC Paper" in text and "Not investment advice" in text
 
 
+def test_ic_paper_lists_the_same_submarkets_in_text_word_and_slides(app, tmp_path):
+    """Someone whose own focus is one submarket still gets the team's IC paper: the written brief, the Word/PDF
+    and the slides' evidence table all list the team's submarkets, the same ones in each."""
+    from skills.brief_deck import tools as bd
+    from skills.market_brief import report
+    from skills.market_brief.tools import team_focus
+    user = "ic_reader"
+    app.store.reset_focus(user)
+    app.call("update_focus", {"request": "only Canary Wharf"}, user)
+    assert app.focus(user)["markets"] == ["Canary Wharf"]
+    md = app.call("generate_brief", {"format": "ic"}, user)["summary"]
+    team = team_focus(app.config)["markets"]
+    slides = [r["market"] for r in bd.deck_data(app.ctx, "ic")["evidence"]]
+    assert slides == team and len(team) > 1
+    word, _ = _note_text(report.build(app.ctx, md, "ic", tmp_path)["docx"])
+    for m in team:
+        assert f"| {m} |" in md or any(line.startswith(f"| {m.split()[0]}") for line in md.splitlines())
+        assert m in word
+    app.store.reset_focus(user)
+
+
 def test_without_pi_the_app_says_how_to_start_the_agent(app, monkeypatch, tmp_path):
     """Pi is the only agent engine: with no Node packages there is no silent fallback, just a clear message."""
     from core.engine import Engine, PiNotReady

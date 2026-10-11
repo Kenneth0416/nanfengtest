@@ -26,13 +26,12 @@ from datetime import date
 from pathlib import Path
 
 from core import analytics as an
-from core import focus as focus_mod
 from core import internal as I
 from core import taxonomy as tx
 from core.signals import SignalEngine
 from core.skill import Tool, obj_schema
 from core.summary import is_tip, team_summary
-from skills.market_brief.tools import IC_METRICS, Footnotes, _signal
+from skills.market_brief.tools import IC_METRICS, Footnotes, _signal, team_focus
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE / "scripts"))
@@ -124,9 +123,9 @@ def deck_data(ctx, fmt: str = "board") -> dict:
                 "markets": s.markets[:2], "flag": s.flag,
                 "refs": "".join(notes.ref(e.text, e.url, e.source_id) for e in s.evidence)}
 
-    # IC paper: evidence for the submarkets the person asking covers (their focus, else the big three).
-    focus = st.focus(ctx.role) or focus_mod.defaults(ctx.config)
-    ic_markets = focus["markets"] or list(tx.TOP_MARKETS[1:])
+    # IC paper: evidence for the team's submarkets, the same list the written brief and the Word/PDF carry.
+    focus = team_focus(ctx.config)
+    ic_markets = focus["markets"]
     evidence = []
     for m in ic_markets:
         row = {"market": m, "cells": []}
@@ -188,7 +187,7 @@ def brief_deck_data(ctx, args):
                        f"What stands out this week, ranked (you decide which deserve a slide, 1-4 content slides):\n{stories}\n"
                        f"{len(d['signals'])} signal cards, {len(d['talk'])} market-talk items, {len(d['our_deals'])} of our deals, "
                        f"{len(d['flagged'])} flagged figures, {len(d['footnotes'])} footnotes. "
-                       f"Focus of the person asking: {', '.join(d['focus']['markets']) or 'whole market'}.",
+                       f"Team focus: {', '.join(d['focus']['markets']) or 'whole market'}.",
             "data": d}
 
 

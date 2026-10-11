@@ -38,6 +38,13 @@ class Footnotes:
                 + (f" - {u}" if u else "") for i, (t, u) in enumerate(self.items, 1)]
 
 
+def team_focus(config) -> dict:
+    """The one view every team output uses (brief text, Word/PDF and slides): the team's default focus, never
+    the reader's own, so the same IC paper lists the same submarkets wherever it is read."""
+    focus = focus_mod.defaults(config)
+    return {**focus, "markets": list(focus.get("markets") or tx.TOP_MARKETS[1:])}
+
+
 def plain_words(text: str) -> str:
     """Model phrasing a reader would trip over, put plainly: 'two unpre-let speculative schemes' becomes
     'two speculative schemes with no pre-lets'."""
@@ -63,7 +70,7 @@ def generate_brief(ctx, args):
     """The team brief: signals people added on the Monitor page (or the top team signals if none),
     written as a board summary or an IC paper section, every figure footnoted to its source."""
     team = ctx.config.get("team", {})
-    focus = focus_mod.defaults(ctx.config)  # one team brief for everyone: the team's view, never the reader's own focus
+    focus = team_focus(ctx.config)  # one team brief for everyone: the team's view, never the reader's own focus
     fmt = args.get("format") or "board"
     items = ctx.store.brief_items()
     picked = bool(items)
@@ -76,7 +83,7 @@ def generate_brief(ctx, args):
     down = [s for s in sigs if s.tone == "negative"]
 
     if fmt == "ic":  # market evidence for the submarkets the person asking covers
-        markets = focus["markets"] or tx.TOP_MARKETS[1:]
+        markets = focus["markets"]
         key = [(m, metric) for m in markets for metric in IC_METRICS]
     else:
         key = KEY_NUMBERS
