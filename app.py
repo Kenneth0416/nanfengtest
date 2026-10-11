@@ -35,12 +35,13 @@ from core import documents
 from core import internal as I
 from core import focus as fx
 from core import follow
+from core.flag import flag_form
 from core import gather
 from core import library as lib
 from core import taxonomy as tx
 from core.app import App
 from core.icons import css as icons_css, icon, material, svg as icon_svg
-from core.engine import AgentUnavailable, Engine, split_follow_ups
+from core.engine import AgentUnavailable, Engine, drop_open_bold, hold_open_bold, open_bold, split_follow_ups
 from core.pi_engine import Answer
 from skills.brief_deck import tools as _bd
 from skills.market_brief import report as _report
@@ -1064,7 +1065,7 @@ def absorb_partial(chat_id, turns, slot: str = ""):
         if stream is not None and hasattr(stream, "cancel"):
             stream.cancel()  # the Node run behind it stops too, so the next question starts at once
         app.store.add_chat_message(partial["chat"], "user", partial["q"])
-        app.store.add_chat_message(partial["chat"], "assistant", (partial["text"].rstrip() or "(nothing written yet)")
+        app.store.add_chat_message(partial["chat"], "assistant", (drop_open_bold(partial["text"]).rstrip() or "(nothing written yet)")
                                    + "\n\n*Stopped.*")
         if partial["chat"] == chat_id:
             open_chat(chat_id, slot)
@@ -1253,6 +1254,7 @@ def stream_answer(asked: str, chat_id: str | None = None, question: str = "", st
                     out, held = held[:-24], held[-24:]
                 else:
                     out = ""
+                out, held = hold_open_bold(shown["text"], out, held)  # an open **phrase shows once it closes
                 held_box["text"] = held
                 held_box["line_start"] = (cut == 0 and held_box["line_start"]) or out.endswith("\n")
                 if out:
@@ -1278,7 +1280,11 @@ def stream_answer(asked: str, chat_id: str | None = None, question: str = "", st
     def pieces_then_rest():
         yield from pieces()
         # whatever was held: all of it unless it is the follow-up line (the buttons below take over)
-        yield split_follow_ups(held_box["text"])[0] if held_box["text"] else ""
+        rest = split_follow_ups(held_box["text"])[0] if held_box["text"] else ""
+        at = open_bold(shown["text"] + rest)
+        if at is not None and at >= len(shown["text"]):  # a ** the answer never closed: drop the marker
+            rest = rest[:at - len(shown["text"])] + rest[at - len(shown["text"]) + 2:]
+        yield rest
     text = st.write_stream(pieces_then_rest())
     stop.empty()
     st.session_state.pop("partial", None)  # finished: nothing to keep from a stop
@@ -1309,7 +1315,7 @@ def setup_card(p):
                     f"- **How much:** {fx.BUDGETS[f['budget']]}\n"
                     f"- **'Why it matters' written for:** {fx.LENSES[f.get('lens', 'team')]}" +
                     "".join(f"\n- **Your alert:** {r['label']} ({r['why']})" for r in p["rules"]))
-        st.caption(" ".join(p["reasons"]))
+        st.caption(" ".join(fx.as_sentences(p["reasons"])))
         c = st.columns(3)
         if c[0].button("Apply", type="primary", width="stretch", key="apply_setup"):
             st.session_state["applied_setup"] = fx.apply_setup(app.store, user, p)
@@ -1416,11 +1422,7 @@ def signal_card(s, i, lens="team", new: bool = False):
         if s.obs_id and not s.flag:
             with b[3].popover("Looks wrong", icon=material("triangle-alert"), help="Flag this number for the team. It stays usable with a warning "
                                                      "until someone checks it."):
-                why_txt = st.text_input("What looks wrong?", key=f"why{i}{s.id}",
-                                        placeholder="Doesn't match the PDF; looks like the City figure")
-                if st.button("Flag for the team", key=f"flag{i}{s.id}", type="primary"):
-                    app.store.flag_observation(s.obs_id, why_txt or "Looks wrong", user)
-                    app.store.log("flag", user, f"flagged '{s.title}': {why_txt or 'looks wrong'}")
+                if flag_form(app.store, s.obs_id, s.title, user, key=f"{i}{s.id}"):
                     st.rerun()
 
 

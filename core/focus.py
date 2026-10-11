@@ -231,12 +231,26 @@ def _suggest_rules(store, markets, measures) -> list[dict]:
     return rules
 
 
+def as_sentences(reasons) -> list[str]:
+    """The model's reasons as sentences that read one after another: each starts with a capital and ends with a
+    full stop, so 'keep the West End focus' and 'Leasing metrics drive ...' never run together."""
+    if isinstance(reasons, str):
+        reasons = [reasons]
+    out = []
+    for r in reasons or []:
+        r = " ".join(str(r).split()).strip(" -•;,")
+        if r:
+            out.append(r[0].upper() + r[1:] + ("" if r[-1] in ".!?" else "."))
+    return out
+
+
 def _refine_with_llm(llm, description, proposal) -> dict:
     """Let the model adjust the rule-based draft; only known keys and values survive."""
     try:
         out = llm.complete_json(
             "A London office market user described their job. Adjust this draft setup to fit them. Return JSON with "
-            "keys markets, measures, budget, reasons (list of short strings). "
+            "keys markets, measures, budget, reasons (a list of one-sentence reasons in plain English, each ending with "
+            "a full stop, written for the user; do not mention JSON keys or the budget number). "
             f"Allowed markets: {list(tx.MARKET_PARENT)}. Allowed measures: {list(MEASURES)}. "
             f"budget one of {list(BUDGETS)}.\n"
             f"Job: {description}\nDraft: {proposal['focus']}")
@@ -244,7 +258,8 @@ def _refine_with_llm(llm, description, proposal) -> dict:
              "measures": [m for m in out.get("measures", []) if m in MEASURES] or proposal["focus"]["measures"],
              "budget": out.get("budget") if out.get("budget") in BUDGETS else proposal["focus"]["budget"],
              "lens": proposal["focus"]["lens"]}
-        return {**proposal, "focus": f, "reasons": out.get("reasons") or proposal["reasons"], "made_by": "llm"}
+        return {**proposal, "focus": f, "reasons": as_sentences(out.get("reasons")) or proposal["reasons"],
+                "made_by": "llm"}
     except Exception:
         return proposal
 

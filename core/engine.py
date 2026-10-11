@@ -69,6 +69,33 @@ def split_follow_ups(text: str) -> tuple[str, list[str]]:
     return text[:m.start()].rstrip(), qs[:3]
 
 
+def open_bold(text: str) -> int | None:
+    """Where an unclosed ** starts in the text, or None when every ** has its pair. While an answer streams in,
+    a bold phrase is held back from its opening ** until it closes, so the marker itself never shows."""
+    marks = [m.start() for m in re.finditer(r"\*\*", text or "")]
+    return marks[-1] if len(marks) % 2 else None
+
+
+def hold_open_bold(shown: str, out: str, held: str, limit: int = 400) -> tuple[str, str]:
+    """(what to show now, what to keep holding) when `out` is about to follow `shown` on screen: from an opening
+    ** that has no pair yet, the text waits in `held` until the pair arrives. A ** that stays open past `limit`
+    characters is let through, so a literal pair of asterisks never stalls the answer."""
+    stars = len(out) - len(out.rstrip("*"))  # a ** split across two pieces: keep its first * back as well
+    if stars and len(held) + len(out) < limit:
+        out, held = out[:-stars], out[-stars:] + held
+    at = open_bold(shown + out)
+    if at is None or at < len(shown) or len(held) + len(out) >= limit:
+        return out, held
+    k = at - len(shown)
+    return out[:k], out[k:] + held
+
+
+def drop_open_bold(text: str) -> str:
+    """An answer cut short (by Stop) as it is kept: a ** left open loses the marker and keeps the words."""
+    at = open_bold(text)
+    return text if at is None else text[:at] + text[at + 2:]
+
+
 class StreamingAnswer:
     """A Copilot answer being written in its own thread. events() yields {"event": "delta", "text": ...} and tool
     events in order; when they end, `answer` holds the complete Answer (text, trace, sources) or `error` the

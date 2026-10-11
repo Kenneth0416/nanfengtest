@@ -1950,3 +1950,76 @@ def test_a_streamed_answer_can_be_read_again_after_an_interruption(app):
     again = list(sa.events())  # the second reader gets everything from the start
     assert [e.get("text") for e in again if e["event"] == "delta"] == ["one ", "two ", "three "]
     assert again[-1] == {"event": "tool", "name": "get_signals"} and sa.answer.text == "one two three" and calls == ["What changed?"]
+
+
+def test_a_bold_phrase_never_shows_its_open_marks_while_streaming_or_after_stop():
+    """A streamed answer used to end its first sentence with a bare '**' until the pair arrived, and a Stop kept
+    it. Now an open **phrase waits until it closes, however the pieces are cut, and a stopped answer drops it."""
+    import random
+    from core.engine import drop_open_bold, hold_open_bold
+    ans = "West End vacancy fell to **7.9%** in Q2, the **lowest since 2019**.\n\nThe **key risk** is new supply."
+    for seed in range(200):
+        rnd, pieces, i = random.Random(seed), [], 0
+        while i < len(ans):
+            n = rnd.randint(1, 9)
+            pieces.append(ans[i:i + n])
+            i += n
+        shown, held = "", ""
+        for p in pieces:  # the app's own loop: a short tail is held back, then the open bold
+            h = held + p
+            out, h = (h[:-24], h[-24:]) if len(h) > 24 else ("", h)
+            out, held = hold_open_bold(shown, out, h)
+            shown += out
+            assert shown.count("**") % 2 == 0 and not shown.endswith("*"), shown
+        assert shown + held == ans
+    assert drop_open_bold("The **key ris") == "The key ris" and drop_open_bold("**Done** here") == "**Done** here"
+    long = "**" + "x" * 500  # a literal pair of asterisks that never closes does not hold the answer back
+    assert hold_open_bold("", long, "")[0] == long
+
+
+def test_a_flag_keeps_the_reason_typed_in_the_box(tmp_path):
+    """Flagging a number on Monitor logged the default 'looks wrong' instead of the reason typed in the box: the
+    reason now sits in a form, so it is sent with the button press."""
+    from streamlit.testing.v1 import AppTest
+    from core.models import Observation
+    from core.store import Store
+    db = tmp_path / "f.db"
+    s = Store(db)
+    s.add_observations([Observation("2026Q2", "West End", "vacancy_pct", 7.9, "kf-q2")])
+    rowid = s.q("SELECT rowid FROM observations")[0]["rowid"]
+
+    def page(root, db, rowid):
+        import sys
+        sys.path.insert(0, root)
+        from core.flag import flag_form
+        from core.store import Store
+        flag_form(Store(db), rowid, "West End vacancy", "Priya", key="k")
+    at = AppTest.from_function(page, args=(str(ROOT), str(db), rowid), default_timeout=30)
+    at.run()
+    at.text_input(key="why_k").input("Looks like the City figure")
+    at.button[0].click()
+    at.run()
+    assert not at.exception
+    s = Store(db)
+    row = s.q("SELECT status, flag, flagged_by FROM observations")[0]
+    assert (row["status"], row["flag"], row["flagged_by"]) == ("flagged", "Looks like the City figure", "Priya")
+    assert s.activity()[0]["text"] == "flagged 'West End vacancy': Looks like the City figure"
+    from core.flag import flag_number  # an empty box still flags it, with the default reason
+    assert flag_number(s, rowid, "West End vacancy", "  ", "Sam") == "Looks wrong"
+
+
+def test_focus_reasons_from_the_model_read_as_sentences(app):
+    """The model's reasons for a proposed focus came back without full stops and ran together on Monitor."""
+    from core import focus as fx
+
+    class Brief:
+        available, model = True, "test"
+        def complete_json(self, *a, **k):
+            return {"markets": ["West End"], "reasons": ["Manages West End buildings, so keep the West End focus",
+                                                         "leasing and tenant metrics drive their asset performance",
+                                                         "Board reporting means a short brief."]}
+    p = fx.propose("I manage our West End buildings and report to the board", app.store, Brief())
+    assert p["reasons"] == ["Manages West End buildings, so keep the West End focus.",
+                            "Leasing and tenant metrics drive their asset performance.",
+                            "Board reporting means a short brief."]
+    assert fx.as_sentences("one reason") == ["One reason."] and fx.as_sentences(None) == []
