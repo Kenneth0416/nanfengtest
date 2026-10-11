@@ -118,7 +118,9 @@ SCOPE [class*="st-key-cp_top_"] { padding:10px 0 8px 0; margin-bottom:4px; }
 SCOPE [class*="st-key-cp_top_"] { flex-wrap:nowrap !important; }
 SCOPE [class*="st-key-cp_top_"] > .stElementContainer:has(> .stHtml) { flex:1 1 auto; width:auto !important; min-width:0; }
 SCOPE [class*="st-key-cp_top_"] > .stElementContainer:has(> .stHtml) .loa-cp-title { flex-wrap:nowrap; overflow:hidden; }
-SCOPE [class*="st-key-cp_top_"] .loa-cp-title .loa-chip { overflow:hidden; text-overflow:ellipsis; max-width:260px; }
+SCOPE [class*="st-key-cp_top_"] .loa-cp-title .loa-deck-row { display:flex; align-items:center; gap:12px; flex-wrap:wrap; font-size:14px; }
+.loa-deck-row .loa-muted { font-size:13px; }
+.loa-chip { overflow:hidden; text-overflow:ellipsis; max-width:260px; }
 SCOPE .loa-cp-title { font-size:16px; font-weight:700; color:var(--ink); display:flex; align-items:center; gap:10px; flex-wrap:wrap; line-height:32px; }
 SCOPE .loa-cp-title .loa-chip { margin:0; font-weight:400; line-height:20px; background:var(--surface); border:1px solid var(--line); }
 SCOPE .loa-cp-title small { font-size:12px; font-weight:400; color:var(--ink3); }
@@ -2204,70 +2206,30 @@ def deck_editor():
 
 
 def deck_panel(fmt):
-    """One place for the slides: theme (with swatches), Build, and for a deck already built from this data the
-    preview (one image per slide), Download .pptx / .pdf, and why these slides. Changing the theme shows that
-    theme's deck if it was built, otherwise the Build button."""
-    with st.container(border=True):
-        st.markdown("**Slides**  ·  " + ("the Copilot reads this week's data and picks the slides, layouts and titles"
-                                        if engine.ready else "picked by rules from this week's data (Copilot offline)"))
-        c = st.columns([2.6, 1.3, 1.3, 1.0, 1.4], vertical_alignment="bottom")
-        if (w := st.session_state.pop("deck_theme_want", None)) and w[0] == fmt:
-            st.session_state[f"deck_theme_{fmt}"] = w[1]  # the editor changed the theme: follow it
-        theme = c[0].selectbox("Slide theme", list(DECK_THEMES), format_func=DECK_THEMES.get, key=f"deck_theme_{fmt}",
-                               index=list(DECK_THEMES).index("data-white" if fmt == "ic" else "navy-gold"),
-                               help="Each format remembers its own theme. IC packs default to Data white.")
-        hit = cached_deck(fmt, theme)
-        if c[1].button("Build again" if hit else "Build slides", key=f"mk_deck_{fmt}", width="stretch",
-                       type="secondary" if hit else "primary", icon=material("refresh-cw") if hit else None,
-                       help=("The slides for this data are already built; this plans them again" if hit else
-                             "Plans a 3-6 slide deck from this week's data; you watch each slide being laid out")):
-            open_deck_editor(fmt, theme, build=True)
-        if not hit:
-            c[4].caption("Five house themes, 13 layouts, every number footnoted and checked against the data. For a "
-                         "deck this button does not give you, ask Copilot: \"a client update on the forest theme that "
-                         "only covers Midtown\".")
-            st.html(theme_swatches())
-            if (st.session_state.get("deck_ed") or {}).get("open"):
-                deck_editor()
-            return
-        d = hit["data"]
-        c[2].download_button("Download .pptx", Path(hit["path"]).read_bytes(), file_name=Path(hit["path"]).name,
-                             mime="application/vnd.openxmlformats-officedocument.presentationml.presentation",
-                             key=f"dl_deck_{fmt}_{theme}", width="stretch", type="primary")
-        if d.get("pdf") and Path(d["pdf"]).exists():
-            c[3].download_button("PDF", Path(d["pdf"]).read_bytes(), file_name=Path(hit["path"]).stem + ".pdf",
-                                 mime="application/pdf", key=f"dl_pdf_{fmt}_{theme}", width="stretch")
-        if c[4].button("Open editor", key=f"ed_open_{fmt}", width="stretch", icon=material("message-square"),
-                       help="Thumbnails, a big preview and a chat to change the slides"):
-            open_deck_editor(fmt, theme)
-        label, plain = DECK_MSG[d["how"]]
+    """The slides stay folded on the page: one row with a status line and a single Slides button. The button
+    opens the floating editor, building the deck first when none exists for this data; the thumbnails, the
+    theme, the downloads and the conversation all live in that window."""
+    if (w := st.session_state.pop("deck_theme_want", None)) and w[0] == fmt:
+        st.session_state[f"deck_theme_{fmt}"] = w[1]  # the editor changed the theme: follow it
+    theme = st.session_state.setdefault(f"deck_theme_{fmt}", "data-white" if fmt == "ic" else "navy-gold")
+    hit = cached_deck(fmt, theme)
+    d = (hit or {}).get("data") or {}
+    if hit:
+        label, _plain = DECK_MSG[d["how"]]
         edits = len(d.get("edits") or [])
-        st.html(f'<div class="loa-muted" style="margin:4px 0 8px 0">{chip(label, "ok" if d["how"] == "copilot" else "warn")}'
-                f'Built {esc(when(hit["ts"]))} · the data has not changed since'
-                + (f' · edited {edits} time{"s" if edits != 1 else ""} in the editor' if edits else "")
-                + (f' · {esc(d["note"])}' if d.get("note") else "") + "</div>")
-        pages = [q for q in d.get("pages") or [] if Path(q).exists()]
-        if pages:
-            cols = st.columns(3)
-            for i, (q, title) in enumerate(zip(pages, d.get("titles") or [""] * len(pages))):
-                with cols[i % 3]:
-                    st.image(q, width="stretch")
-                    if st.button(f"{i + 1} · {title}" if title else str(i + 1), key=f"pg_{fmt}_{theme}_{i}",
-                                 type="tertiary", width="stretch", help="Open this slide in the editor"):
-                        open_deck_editor(fmt, theme, sel=i + 1)
-        else:
-            st.caption("No slide images on this server (" + (d.get("preview_note") or "preview not rendered")
-                       + "); the outline:")
-            for line in d.get("slides") or []:
-                st.markdown(f"- {line}")
-        row = st.columns([1.4, 4.6], vertical_alignment="center")
-        with row[0].popover("Why these slides", width="stretch"):
-            st.caption(f"{fx.BRIEF_FORMATS[fmt]} · {DECK_THEMES[d['theme']]}")
-            for line in d.get("slides") or []:
-                st.markdown(f"- {line}")
-        for q in d.get("problems") or []:
-            row[1].html(f'<div class="loa-muted">{ic("triangle-alert", 13, "flag")}{esc(q)}</div>')
-        st.html(theme_swatches())
+        status = (f'{chip(label, "ok" if d["how"] == "copilot" else "warn")}{len(d.get("titles") or [])} slides · '
+                  f'{esc(DECK_THEMES.get(d["theme"], d["theme"]))} · built {esc(when(hit["ts"]))}'
+                  + (f' · edited {edits} time{"s" if edits != 1 else ""}' if edits else ""))
+    else:
+        status = ("Not built yet · the Copilot reads this week's data and picks the slides, layouts and titles"
+                  if engine.ready else "Not built yet · picked by rules from this week's data (Copilot offline)")
+    with st.container(border=True, key=f"deck_row_{fmt}", horizontal=True, vertical_alignment="center", gap="small"):
+        st.html(f'<div class="loa-deck-row"><b>Slides</b><span class="loa-muted">{status}</span></div>', width="stretch")
+        if st.button("Open slides" if hit else "Build slides", key=f"mk_deck_{fmt}", width="content",
+                     type="secondary" if hit else "primary", icon=material("presentation") if hit else None,
+                     help=("Thumbnails, a big preview, downloads and a chat to change the slides" if hit else
+                           "Plans a 3-6 slide deck from this week's data; you watch each slide being laid out")):
+            open_deck_editor(fmt, theme, build=not hit)
     if (st.session_state.get("deck_ed") or {}).get("open"):
         deck_editor()
 
