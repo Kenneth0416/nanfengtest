@@ -10,5 +10,7 @@ anthropic>=1.0
 openai>=1.50
 pytest>=8.0
 python-pptx>=1.0
+python-docx>=1.1
+matplotlib>=3.8
 pillow>=10.0
 pypdf>=4.0

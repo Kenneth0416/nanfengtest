@@ -122,6 +122,38 @@ def test_team_brief_uses_added_signals_with_footnotes(app):
     app.store.remove_from_brief(sig.id)
 
 
+def test_brief_downloads_as_a_branded_research_note(app, tmp_path):
+    """The brief as Word (and PDF when LibreOffice is there): cover, header and footer with the co-brand, the
+    key numbers as a table, three charts, every source numbered, and the important-information page."""
+    from docx import Document
+    from skills.market_brief import report
+    md = app.call("generate_brief", {"format": "board"}, "Kenneth")["summary"]
+    b = report.parse(md)
+    assert b.title and b.sources and b.section("Key numbers") and b.section("Headline")
+    out = report.build(app.ctx, md, "board", tmp_path)
+    doc = Document(out["docx"])
+    text = "\n".join(p.text for p in doc.paragraphs)
+    cells = "\n".join(c.text for t in doc.tables for r in t.rows for c in r.cells)
+    assert "London Office Market" in cells and "Weekly brief" in cells  # the navy cover
+    assert "Key takeaways" in text and "Key numbers" in text and "Important information" in text
+    assert "Knight Frank" in text and "NOT ADVICE" in text and "Sources" in text
+    assert "Vacancy rate" in cells and "Prime rent" in cells
+    assert sum(1 for r in doc.inline_shapes) >= 5  # co-brand on the cover and closing page, three charts
+    assert all(f"[{i}]" in text for i in range(1, len(b.sources) + 1))
+    sec = doc.sections[1]
+    assert "Prepared for Nan Fung Group" in sec.footer.paragraphs[0].text
+    for el in doc.element.iter(*report._ORDER):  # Word refuses properties out of schema order
+        ranks = [report._ORDER[el.tag].get(k.tag, 99) for k in el]
+        assert ranks == sorted(ranks), el.tag
+    assert "WEEKLY BRIEF" in "".join(c.text for t in sec.header.tables for r in t.rows for c in r.cells)
+    if out["pdf"]:
+        from pypdf import PdfReader
+        pages = PdfReader(out["pdf"]).pages
+        assert len(pages) >= 3 and "Important information" in pages[-1].extract_text()
+    else:
+        assert "LibreOffice" in out["why"]
+
+
 def test_without_pi_the_app_says_how_to_start_the_agent(app, monkeypatch, tmp_path):
     """Pi is the only agent engine: with no Node packages there is no silent fallback, just a clear message."""
     from core.engine import Engine, PiNotReady

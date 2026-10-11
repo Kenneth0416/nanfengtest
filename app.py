@@ -14,6 +14,7 @@ sharing, watching rules, what needs a person and team activity.
 """
 from __future__ import annotations
 
+import copy
 import hashlib
 import html
 import json
@@ -42,6 +43,7 @@ from core.icons import css as icons_css, icon, material, svg as icon_svg
 from core.engine import AgentUnavailable, Engine, split_follow_ups
 from core.pi_engine import Answer
 from skills.brief_deck import tools as _bd
+from skills.market_brief import report as _report
 from core.signals import SignalEngine
 from core.summary import is_tip, team_summary
 from skills.watchlist_alerts.tools import parse_rule
@@ -2261,7 +2263,7 @@ def deck_editor():
 
 
 def deck_button(fmt, col):
-    """The slides stay folded: one button beside Download (.md). It opens the floating editor, building the deck
+    """The slides stay folded: one button beside the Word and PDF downloads. It opens the floating editor, building the deck
     first when none exists for this data; thumbnails, theme, downloads and the conversation all live there."""
     if (w := st.session_state.pop("deck_theme_want", None)) and w[0] == fmt:
         st.session_state[f"deck_theme_{fmt}"] = w[1]  # the editor changed the theme: follow it
@@ -2322,6 +2324,69 @@ def write_brief_in_background(fmt, fp):
     return None
 
 
+def report_files(fmt, fp, brief):
+    """The brief as a research note (.docx, and the same document as .pdf), made in a thread of its own from the
+    brief exactly as shown, and kept against the brief's text: opening the page again reads the files back, and
+    only new data or "Write again" makes them again. Returns the cached entry, or None while it is being made."""
+    key = f"{fp}-{hashlib.sha1(brief.encode()).hexdigest()[:10]}"
+    hit = app.store.cached("brief_doc", key)
+    d = (hit or {}).get("data") or {}
+    if hit and Path(d.get("docx") or "").exists():
+        return d
+    jobs = st.session_state.setdefault("bg_jobs", {})
+    job = jobs.get("doc-" + key)
+    if job is None or not job.is_alive():
+        def work():
+            # a connection of its own: one sqlite connection shared with the page's reruns fails under load
+            own = type(app.store)(app.store.path)
+            ctx = copy.copy(app.ctx)
+            ctx.store = own
+            folder = app.root / "data" / "exports" / "briefs" / key
+            try:
+                out = _report.build(ctx, brief, fmt, folder)
+            except Exception as e:  # noqa: BLE001
+                out = {"docx": "", "pdf": "", "why": f"The report could not be made: {e}"}
+            own.save_cached("brief_doc", key, out, str(folder))
+            own.db.close()
+        job = jobs["doc-" + key] = threading.Thread(target=work, daemon=True, name=f"brief-doc-{fmt}")
+        job.start()
+    return None
+
+
+def report_buttons(fmt, fp, brief, docx_col, pdf_col):
+    """Download (.docx) and Download (.pdf) in place of the Markdown download. While the files are being made the
+    two buttons wait, greyed out, and the row looks again every second."""
+    files = report_files(fmt, fp, brief)
+    if files is None:
+        @st.fragment(run_every="1s")
+        def wait():
+            if report_files(fmt, fp, brief) is not None:
+                st.rerun()
+            st.button("Word · preparing…", disabled=True, width="stretch", key="rep_wait_docx",
+                      help="Laying out the research note from this brief")
+        with docx_col:
+            wait()
+        pdf_col.button("PDF · preparing…", disabled=True, width="stretch", key="rep_wait_pdf",
+                       help="Laying out the research note from this brief")
+        return
+    name = "london-office-ic-paper" if fmt == "ic" else "london-office-weekly-brief"
+    if files.get("docx"):
+        docx_col.download_button(
+            "Download Word", Path(files["docx"]).read_bytes(), file_name=f"{name}.docx", width="stretch",
+            mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document", key=f"dl_docx_{fmt}",
+            icon=material("file-text"), help="The research note as an editable Word document, in the house style")
+    else:
+        docx_col.button("Word unavailable", disabled=True, width="stretch", help=files.get("why") or "")
+    if files.get("pdf") and Path(files["pdf"]).exists():
+        pdf_col.download_button("Download PDF", Path(files["pdf"]).read_bytes(), file_name=f"{name}.pdf",
+                                mime="application/pdf", width="stretch", key=f"dl_pdf_{fmt}",
+                                icon=":material/picture_as_pdf:", help="The same research note as a PDF")
+    else:
+        pdf_col.button("PDF unavailable", disabled=True, width="stretch", key=f"dl_pdf_off_{fmt}",
+                       help=(files.get("why") or "LibreOffice is not installed here")
+                       + ". The Word download has the same layout.")
+
+
 def brief_page():
     st.session_state["page"] = "brief"
     page_header("Team brief", "Built from the signals the team added this week. Every number has a footnote.")
@@ -2339,7 +2404,7 @@ def brief_page():
                 "Monitor to choose them.")
     if st.button("Add more from Monitor", type="tertiary", key="more_from_monitor"):
         goto("monitor")
-    row = st.columns([2.8, 1.1, 1.1], vertical_alignment="center")
+    row = st.columns([2.3, 1.05, 1.0, 1.0], vertical_alignment="center")
     with row[0]:
         fmt = st.segmented_control("Write it as", list(fx.BRIEF_FORMATS), default="board",
                                    format_func=fx.BRIEF_FORMATS.get, key="brief_fmt") or "board"
@@ -2353,8 +2418,12 @@ def brief_page():
         if not hit:
             return  # the page polls until the brief is there; switching pages does not stop the writing
     brief, made = hit["data"], hit["ts"]
-    row[1].download_button("Download (.md)", brief, file_name="london-office-team-brief.md", width="stretch")
-    deck_button(fmt, row[2])
+    if brief.startswith("The brief could not be written"):
+        row[1].button("Download Word", disabled=True, width="stretch", key="dl_docx_off")
+        row[2].button("Download PDF", disabled=True, width="stretch", key="dl_pdf_off")
+    else:
+        report_buttons(fmt, fp, brief, row[1], row[2])
+    deck_button(fmt, row[3])
     deck_panel(fmt)
     with st.container(border=True):
         st.html(f'<div class="loa-cobrand">{brand_img("cobrand-nanfung.svg", "", "London Office Market Agent · Nan Fung Group")}'

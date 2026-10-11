@@ -27,7 +27,7 @@ def render_pdf(pptx: str | Path, out_dir: str | Path, timeout: int = 120) -> tup
         try:
             r = subprocess.run(cmd, env=env, capture_output=True, text=True, timeout=timeout)
         except (subprocess.TimeoutExpired, OSError) as e:
-            return {"pdf": "", "pages": [], "why": f"PDF conversion failed: {e}"}
+            return "", f"PDF conversion failed: {e}"
     made = out_dir / (pptx.stem + ".pdf")
     if not made.exists():
         return "", "PDF conversion failed: " + (r.stderr or r.stdout).strip()[-300:]
