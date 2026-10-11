@@ -8,6 +8,7 @@ PATHS = {
     'activity': '<path d="M22 12h-2.48a2 2 0 0 0-1.93 1.46l-2.35 8.36a.25.25 0 0 1-.48 0L9.24 2.18a.25.25 0 0 0-.48 0l-2.35 8.36A2 2 0 0 1 4.49 12H2"/>',
     'alarm-clock': '<circle cx="12" cy="13" r="8"/><path d="M12 9v4l2 2"/><path d="M5 3 2 6"/><path d="m22 6-3-3"/><path d="M6.38 18.7 4 21"/><path d="M17.64 18.67 20 21"/>',
     'arrow-down': '<path d="M12 5v14"/><path d="m19 12-7 7-7-7"/>',
+    'share-2': '<circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" x2="15.42" y1="13.51" y2="17.49"/><line x1="15.41" x2="8.59" y1="6.51" y2="10.49"/>',
     'arrow-right': '<path d="M5 12h14"/><path d="m12 5 7 7-7 7"/>',
     'arrow-up': '<path d="m5 12 7-7 7 7"/><path d="M12 19V5"/>',
     'bell': '<path d="M10.268 21a2 2 0 0 0 3.464 0"/><path d="M3.262 15.326A1 1 0 0 0 4 17h16a1 1 0 0 0 .74-1.673C19.41 13.956 18 12.499 18 8A6 6 0 0 0 6 8c0 4.499-1.411 5.956-2.738 7.326"/>',
@@ -103,7 +104,7 @@ MATERIAL = {"activity": ":material/monitoring:", "message-square": ":material/ch
             "sparkles": ":material/auto_awesome:", "history": ":material/history:", "x": ":material/close:",
             "download": ":material/download:", "send": ":material/send:", "eye": ":material/visibility:",
             "presentation": ":material/co_present:", "upload": ":material/upload:", "wrench": ":material/build:",
-            "circle-x": ":material/cancel:", "circle-check": ":material/check_circle:", "info": ":material/info:"}
+            "circle-x": ":material/cancel:", "share-2": ":material/share:", "link-off": ":material/link_off:", "circle-check": ":material/check_circle:", "info": ":material/info:"}
 
 
 def material(name: str) -> str | None:

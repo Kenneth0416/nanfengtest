@@ -1359,3 +1359,25 @@ def test_brand_files_are_in_place_and_the_deck_carries_the_co_brand(deck_app):
     assert marks[0].left > prs.slide_width // 2, "top right, clear of the eyebrow and title"
     icons = [sh for sl in list(prs.slides)[1:] for sh in sl.shapes if sh.name == "app icon"]
     assert icons and all(ic.top >= Inches(7) for ic in icons)
+
+
+def test_copilot_answers_reach_team_activity_only_when_shared(app):
+    """A Copilot conversation is private to its owner; only an answer the owner shares appears in team activity,
+    with the question, their name and the time, and unsharing removes it again."""
+    before = len(app.store.activity(50))
+    chat = app.store.new_chat("Kenneth")
+    app.store.add_chat_message(chat, "user", "Is Midtown vacancy still falling?")
+    mid = app.store.add_chat_message(chat, "assistant", "Yes: 8.0% in Q2 2026 [1].",
+                                     [{"tool": "get_signals", "args": {}, "result": {}}], "pi")
+    assert len(app.store.activity(50)) == before, "asking alone shares nothing"
+    assert app.store.shared_by(mid) is None
+    app.store.share_answer(mid, "Kenneth")
+    app.store.share_answer(mid, "Kenneth")  # a second click changes nothing
+    acts = [a for a in app.store.activity(50) if a["kind"] == "ask"]
+    assert len(acts) == 1 and acts[0]["author"] == "Kenneth" and acts[0]["ref"] == str(mid)
+    assert acts[0]["text"] == "Is Midtown vacancy still falling?" and "8.0%" in acts[0]["answer"]
+    assert app.store.shared_by(mid)["author"] == "Kenneth" and app.store.shared_by(mid)["ts"]
+    app.store.unshare_answer(mid)
+    assert app.store.shared_by(mid) is None and not [a for a in app.store.activity(50) if a["kind"] == "ask"]
+    app.store.share_answer(mid - 1, "Kenneth")  # a question (user turn) cannot be shared on its own
+    assert not [a for a in app.store.activity(50) if a["kind"] == "ask"]

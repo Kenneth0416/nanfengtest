@@ -61,6 +61,7 @@ MIGRATIONS = [
     ("observations", "flag TEXT DEFAULT ''"),
     ("observations", "flagged_by TEXT DEFAULT ''"),
     ("observations", "resolved_by TEXT DEFAULT ''"),
+    ("team_log", "ref TEXT DEFAULT ''"),               # a shared Copilot answer: the chat_messages id it came from
 ]
 SOURCE_COLS = ("source_id", "publisher", "title", "period", "url", "definition_note", "channel", "licence",
                "uploaded_by", "uploaded_at", "file_hash")
@@ -204,12 +205,37 @@ class Store:
         self.db.commit()
         return chat_id
 
-    def add_chat_message(self, chat_id: str, role: str, content: str, trace: list | None = None, engine: str = ""):
-        self.db.execute("INSERT INTO chat_messages (chat_id, role, content, trace, engine) VALUES (?,?,?,?,?)",
-                        (chat_id, role, content, json.dumps(trace) if trace else "", engine))
+    def add_chat_message(self, chat_id: str, role: str, content: str, trace: list | None = None, engine: str = "") -> int:
+        cur = self.db.execute("INSERT INTO chat_messages (chat_id, role, content, trace, engine) VALUES (?,?,?,?,?)",
+                              (chat_id, role, content, json.dumps(trace) if trace else "", engine))
         self.db.execute("UPDATE chats SET updated = CURRENT_TIMESTAMP, title = CASE WHEN title = '' AND ? = 'user' "
                         "THEN ? ELSE title END WHERE id = ?", (role, content[:80], chat_id))
         self.db.commit()
+        return cur.lastrowid
+
+    # -- sharing: a Copilot answer reaches the team only when its owner shares it -------------------------
+    def share_answer(self, message_id: int, by: str):
+        """Put one answer (with the question before it) in team activity, as a conscious choice by the person
+        who asked; sharing twice does nothing."""
+        if self.shared_by(message_id):
+            return
+        m = self.q("SELECT * FROM chat_messages WHERE id = ?", (message_id,))
+        if not m or m[0]["role"] != "assistant":
+            return
+        q = self.q("SELECT content FROM chat_messages WHERE chat_id = ? AND id < ? AND role = 'user' ORDER BY id DESC LIMIT 1",
+                   (m[0]["chat_id"], message_id))
+        self.db.execute("INSERT INTO team_log (kind, author, text, answer, ref) VALUES ('ask',?,?,?,?)",
+                        (by, q[0]["content"] if q else "", m[0]["content"][:2000], str(message_id)))
+        self.db.commit()
+
+    def unshare_answer(self, message_id: int):
+        self.db.execute("DELETE FROM team_log WHERE kind = 'ask' AND ref = ?", (str(message_id),))
+        self.db.commit()
+
+    def shared_by(self, message_id: int) -> dict | None:
+        """{author, ts} when this answer is in team activity, else None."""
+        r = self.q("SELECT author, ts FROM team_log WHERE kind = 'ask' AND ref = ? LIMIT 1", (str(message_id),))
+        return r[0] if r else None
 
     def chats(self, owner: str, limit: int = 30) -> list[dict]:
         """A person's conversations, newest first, only those with a message (an empty new chat is not listed)."""

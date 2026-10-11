@@ -262,7 +262,7 @@ def open_chat(chat_id: str | None):
     st.session_state["chat_id"] = chat_id
     turns = []
     for m in (app.store.chat_messages(chat_id) if chat_id else []):
-        turn = {"role": m["role"], "content": m["content"]}
+        turn = {"role": m["role"], "content": m["content"], "id": m["id"]}
         if m["role"] == "assistant" and m["trace"]:
             turn["answer"] = Answer(m["content"], m["trace"], m["engine"])
         turns.append(turn)
@@ -295,7 +295,7 @@ def say(role: str, content: str, ans: Answer | None = None):
     if ans is not None:
         turn["answer"] = ans
     st.session_state.setdefault("chat_turns", []).append(turn)
-    app.store.add_chat_message(chat_id, role, content, ans.trace if ans else None, ans.engine if ans else "")
+    turn["id"] = app.store.add_chat_message(chat_id, role, content, ans.trace if ans else None, ans.engine if ans else "")
 
 
 def when(ts: str) -> str:
@@ -686,6 +686,28 @@ def absorb_partial(chat_id, turns):
     return turns
 
 
+def share_controls(turn):
+    """A Copilot answer stays private to the person who asked until they share it: 'Share to team' puts the
+    question and answer in team activity with their name and the time; 'Unshare' takes it out again."""
+    mid = turn.get("id")
+    if not mid:
+        return
+    shared = app.store.shared_by(mid)
+    c = st.columns([1.4, 4.6], vertical_alignment="center")
+    if shared:
+        if c[0].button("Unshare", icon=material("link-off"), key=f"unshare{mid}", type="tertiary",
+                       help="Take this answer out of team activity"):
+            app.store.unshare_answer(mid)
+            _rerun()
+        c[1].caption(f"Shared with the team by {shared['author']} · {lib.when(shared['ts'])}")
+    else:  # the chat on screen is always the viewer's own
+        if c[0].button("Share to team", icon=material("share-2"), key=f"share{mid}", type="tertiary",
+                       help="Only you can see this answer until you share it; sharing puts the question and "
+                            "answer in team activity with your name"):
+            app.store.share_answer(mid, user)
+            _rerun()
+
+
 def copilot_thread(turns, ctx, question):
     for turn in turns:
         with st.chat_message(turn["role"]):
@@ -693,6 +715,7 @@ def copilot_thread(turns, ctx, question):
                 st.markdown(turn["content"])
             else:
                 show_answer(turn["answer"])
+                share_controls(turn)
     if question and ctx["kind"] == "setup":
         say("user", question)
         with st.spinner("Drafting your setup…"):
@@ -733,7 +756,6 @@ def copilot_thread(turns, ctx, question):
                                    mime="application/vnd.openxmlformats-officedocument.presentationml.presentation")
                 say("user", question)
                 say("assistant", reply)
-                app.store.log("ask", user, question, reply[:600])
         return
     if question:
         st.session_state["undo_ready"] = False
@@ -748,7 +770,6 @@ def copilot_thread(turns, ctx, question):
             show_answer(ans, text_done=True)
         say("user", question)
         say("assistant", ans.text, ans)
-        app.store.log("ask", user, question, ans.text[:600])
         focus_input()
         _rerun()  # the thread re-renders from the saved chat: follow-up buttons, no raw 'Follow up:' line
 
@@ -1077,15 +1098,18 @@ def activity_panel():
         st.html('<div class="loa-h2" style="font-size:17px">Team activity</div>')
         acts = app.store.activity(8)
         if not acts:
-            st.caption("Nothing yet. Questions, uploads, checks, alerts and brief picks from the team show here.")
+            st.caption("Nothing yet. Uploads, checks, alerts, brief picks and the Copilot answers colleagues choose "
+                       "to share show here.")
         for a in acts:
             when = lib.when(a.get("ts"))
             if a["kind"] == "auto":
                 st.html(f'<div><span class="loa-dot green"></span>Auto-update: {esc(a["text"])}'
                         f'<div class="loa-muted" style="margin-left:17px">{esc(when)}</div></div>')
-            elif a["kind"] == "ask":
-                with st.expander(f"{a['author']} asked: {a['text'][:60]}"):
-                    st.markdown(a["answer"] or "")
+            elif a["kind"] == "ask":  # a Copilot answer its owner chose to share
+                with st.expander(f"{a['author']} shared: {a['text'][:60]}", icon=material("share-2")):
+                    st.caption(f"Shared by {a['author']} · {when}")
+                    ans = a["answer"] or ""
+                    st.markdown(ans if len(ans) <= 700 else ans[:700].rsplit(" ", 1)[0] + " …")
             else:
                 dot = '<span class="loa-dot blue" style="margin-right:4px"></span>' if a["kind"] == "internal" else ""
                 st.html(f'<div style="display:flex;gap:8px;margin:6px 0"><span class="loa-av">'
