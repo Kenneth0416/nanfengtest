@@ -62,6 +62,7 @@ MIGRATIONS = [
     ("observations", "flagged_by TEXT DEFAULT ''"),
     ("observations", "resolved_by TEXT DEFAULT ''"),
     ("team_log", "ref TEXT DEFAULT ''"),               # a shared Copilot answer: the chat_messages id it came from
+    ("team_log", "note TEXT DEFAULT ''"),              # the sharer's one-line reason ("IC needs this")
 ]
 SOURCE_COLS = ("source_id", "publisher", "title", "period", "url", "definition_note", "channel", "licence",
                "uploaded_by", "uploaded_at", "file_hash")
@@ -84,6 +85,11 @@ class Store:
                 self.db.execute(f"ALTER TABLE {table} ADD COLUMN {col}")
             except sqlite3.OperationalError:
                 pass
+        self.db.commit()
+        # Copilot answers logged before sharing became a choice (no ref) must not stay public
+        self.db.execute("DELETE FROM team_log WHERE kind = 'ask' AND (ref IS NULL OR ref = '')")
+        self.db.execute("DELETE FROM team_log WHERE kind = 'setup' OR (kind = 'brief' AND (text LIKE 'built the team brief%' "
+                        "OR text LIKE 'rewrote the team brief%'))")
         self.db.commit()
 
     # -- writes -------------------------------------------------------------
@@ -148,6 +154,15 @@ class Store:
                               (role, market, metric, op, value, label, author))
         self.db.commit()
         return cur.lastrowid
+
+    def share_watch_rule(self, rule_id: int):
+        """A personal alert becomes the team's: it then shows and fires for everyone."""
+        self.db.execute("UPDATE watch_rules SET role='team' WHERE id=?", (rule_id,))
+        self.db.commit()
+
+    def unhide_signals(self, role: str):
+        self.db.execute("DELETE FROM feedback WHERE role=? AND vote<0", (role,))
+        self.db.commit()
 
     def delete_watch_rule(self, rule_id: int):
         self.db.execute("DELETE FROM watch_rules WHERE id=?", (rule_id,))
@@ -214,9 +229,9 @@ class Store:
         return cur.lastrowid
 
     # -- sharing: a Copilot answer reaches the team only when its owner shares it -------------------------
-    def share_answer(self, message_id: int, by: str):
+    def share_answer(self, message_id: int, by: str, note: str = ""):
         """Put one answer (with the question before it) in team activity, as a conscious choice by the person
-        who asked; sharing twice does nothing."""
+        who asked, with an optional one-line reason; sharing twice does nothing."""
         if self.shared_by(message_id):
             return
         m = self.q("SELECT * FROM chat_messages WHERE id = ?", (message_id,))
@@ -224,9 +239,14 @@ class Store:
             return
         q = self.q("SELECT content FROM chat_messages WHERE chat_id = ? AND id < ? AND role = 'user' ORDER BY id DESC LIMIT 1",
                    (m[0]["chat_id"], message_id))
-        self.db.execute("INSERT INTO team_log (kind, author, text, answer, ref) VALUES ('ask',?,?,?,?)",
-                        (by, q[0]["content"] if q else "", m[0]["content"][:2000], str(message_id)))
+        self.db.execute("INSERT INTO team_log (kind, author, text, answer, ref, note) VALUES ('ask',?,?,?,?,?)",
+                        (by, q[0]["content"] if q else "", m[0]["content"][:4000], str(message_id), note[:200]))
         self.db.commit()
+
+    def shared_answer(self, ref: str) -> dict | None:
+        """The shared chat message itself (content, trace, engine), so the charts and sources travel with it."""
+        r = self.q("SELECT * FROM chat_messages WHERE id = ?", (ref,))
+        return {**r[0], "trace": json.loads(r[0]["trace"]) if r[0]["trace"] else []} if r else None
 
     def unshare_answer(self, message_id: int):
         self.db.execute("DELETE FROM team_log WHERE kind = 'ask' AND ref = ?", (str(message_id),))
@@ -247,7 +267,10 @@ class Store:
                 for r in self.q("SELECT * FROM chat_messages WHERE chat_id = ? ORDER BY id", (chat_id,))]
 
     def activity(self, limit: int = 8) -> list[dict]:
-        return self.q("SELECT * FROM team_log ORDER BY id DESC LIMIT ?", (limit,))
+        """What the team did, newest first. Auto-updates would drown it, so only the latest one is kept."""
+        rows = self.q("SELECT * FROM team_log WHERE kind != 'auto' ORDER BY id DESC LIMIT ?", (limit,))
+        rows += self.q("SELECT * FROM team_log WHERE kind = 'auto' ORDER BY id DESC LIMIT 1")
+        return sorted(rows, key=lambda r: -r["id"])[:limit]
 
     def mark_checked(self, signal_id: str, by: str):
         self.db.execute("INSERT OR REPLACE INTO checked (signal_id, checked_by) VALUES (?,?)", (signal_id, by))

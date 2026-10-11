@@ -48,7 +48,7 @@ def generate_brief(ctx, args):
     """The team brief: signals people added on the Monitor page (or the top team signals if none),
     written as a board summary or an IC paper section, every figure footnoted to its source."""
     team = ctx.config.get("team", {})
-    focus = ctx.store.focus(ctx.role) or focus_mod.defaults(ctx.config)
+    focus = focus_mod.defaults(ctx.config)  # one team brief for everyone: the team's view, never the reader's own focus
     fmt = args.get("format") or "board"
     items = ctx.store.brief_items()
     picked = bool(items)

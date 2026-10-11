@@ -22,6 +22,14 @@ def _lta(store, market: str, metric: str) -> float | None:
     return None
 
 
+def lta_source(store, market: str, metric: str) -> str:
+    """Which source carried that long-term average (often an older report than the latest figure)."""
+    for row in reversed(an.series(store, market, metric)):
+        if row.get("lta") is not None:
+            return row.get("source_id", "")
+    return ""
+
+
 def _move(snap: dict, rising: str, falling: str) -> str:
     if snap["change"] is None or abs(snap["change"]) < 1e-9:
         return "held at"

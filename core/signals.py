@@ -114,8 +114,8 @@ class SignalEngine:
         cap at their depth."""
         from .focus import measure_of, in_markets
         hidden = self.store.hidden_signals(user)
-        ranked = [s for s in self.for_role(focus.get("lens") or "team", focus.get("markets") or [])
-                  if s.id not in hidden]
+        ranked = [s for s in self.watch_alerts(user) + self.for_role(focus.get("lens") or "team", focus.get("markets") or [])
+                  if s.id not in hidden]  # a person's own alerts first, then the team's ranked list
         keep = [s for s in ranked if (s.kind == "alert" or measure_of(s) in focus.get("measures", []))
                 and in_markets(s, focus.get("markets") or [])]
         budget = focus.get("budget", "5")
@@ -294,15 +294,18 @@ class SignalEngine:
             if not (today_q <= p["expected_completion"] <= end_q):
                 continue
             ref = an.source_ref(self.store, p["source_id"])
+            src_period = (self.store.sources().get(p["source_id"]) or {}).get("period", "")
+            stale = bool(src_period) and src_period < an.quarters_ago(self.today, 2)  # the status may have moved on
             out.append(Signal(
                 kind="pipeline", title=f"{int(p['size_sqft']):,} sq ft speculative scheme due {an.period_label(p['expected_completion'])} in {p['submarket']}",
                 detail=f"{p['scheme']} ({int(p['size_sqft']):,} sq ft) is under construction without a pre-let and "
                        f"is expected to complete in {an.period_label(p['expected_completion'])}.",
                 why="New speculative space will compete for tenants with existing buildings nearby.",
-                severity=2 if p["size_sqft"] < 300_000 else 3, direction="up", tone="negative",
+                severity=(1 if stale else 2) if p["size_sqft"] < 300_000 else (2 if stale else 3), direction="up", tone="negative",
                 markets=[p["submarket"]], roles=_w(.4, .6, 1.0, .4), as_of=p["expected_completion"],
                 after=f"{int(p['size_sqft']) / 1000:,.0f}k sq ft", change="speculative, due " + an.period_label(p["expected_completion"]),
-                context="none of it pre-let", evidence=[Evidence(ref["title"], p["source_id"], ref["url"])]))
+                context="none of it pre-let" + (f" as of {an.period_label(src_period)}; status not re-checked since" if stale else ""),
+                evidence=[Evidence(ref["title"], p["source_id"], ref["url"])]))
         return out
 
     def macro(self) -> list[Signal]:

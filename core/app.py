@@ -34,10 +34,13 @@ class App:
         conns = self.connectors if self.live else [c for c in self.connectors if c.id == "seed_research"]
         reports = refresh(self.ctx, conns)
         names = {f.get("connector"): f["name"] for f in self.config.get("feeds", [])}
-        names["seed_research"] = "PoC seed data"  # the curated snapshot, not one feed
+        # The curated seed snapshot (figures restated from public reports) is loaded, not collected: it is never
+        # counted as data that came in today, so the activity line only names the live connectors.
         parts = [f"{names.get(r['connector'], r['connector'])} "
-                 + ("failed" if r.get("error") else f"{sum(r['counts'].values())} items") for r in reports]
-        self.store.log("auto", by, "collected open data: " + "; ".join(parts))
+                 + ("failed" if r.get("error") else f"{sum(r['counts'].values())} items")
+                 for r in reports if r["connector"] != "seed_research"]
+        self.store.log("auto", by, ("collected open data: " + "; ".join(parts)) if parts
+                       else "loaded the PoC seed snapshot (no live feeds in this run)")
         self.seed_internal()
         return reports
 

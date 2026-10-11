@@ -8,6 +8,8 @@ PATHS = {
     'activity': '<path d="M22 12h-2.48a2 2 0 0 0-1.93 1.46l-2.35 8.36a.25.25 0 0 1-.48 0L9.24 2.18a.25.25 0 0 0-.48 0l-2.35 8.36A2 2 0 0 1 4.49 12H2"/>',
     'alarm-clock': '<circle cx="12" cy="13" r="8"/><path d="M12 9v4l2 2"/><path d="M5 3 2 6"/><path d="m22 6-3-3"/><path d="M6.38 18.7 4 21"/><path d="M17.64 18.67 20 21"/>',
     'arrow-down': '<path d="M12 5v14"/><path d="m19 12-7 7-7-7"/>',
+    'user': '<path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/>',
+    'eye-off': '<path d="M10.733 5.076a10.744 10.744 0 0 1 11.205 6.575 1 1 0 0 1 0 .696 10.747 10.747 0 0 1-1.444 2.49"/><path d="M14.084 14.158a3 3 0 0 1-4.242-4.242"/><path d="M17.479 17.499a10.75 10.75 0 0 1-15.417-5.151 1 1 0 0 1 0-.696 10.75 10.75 0 0 1 4.446-5.143"/><path d="m2 2 20 20"/>',
     'share-2': '<circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" x2="15.42" y1="13.51" y2="17.49"/><line x1="15.41" x2="8.59" y1="6.51" y2="10.49"/>',
     'arrow-right': '<path d="M5 12h14"/><path d="m12 5 7 7-7 7"/>',
     'arrow-up': '<path d="m5 12 7-7 7 7"/><path d="M12 19V5"/>',
@@ -104,7 +106,7 @@ MATERIAL = {"activity": ":material/monitoring:", "message-square": ":material/ch
             "sparkles": ":material/auto_awesome:", "history": ":material/history:", "x": ":material/close:",
             "download": ":material/download:", "send": ":material/send:", "eye": ":material/visibility:",
             "presentation": ":material/co_present:", "upload": ":material/upload:", "wrench": ":material/build:",
-            "circle-x": ":material/cancel:", "share-2": ":material/share:", "link-off": ":material/link_off:", "circle-check": ":material/check_circle:", "info": ":material/info:"}
+            "circle-x": ":material/cancel:", "share-2": ":material/share:", "eye-off": ":material/visibility_off:", "user": ":material/person:", "link-off": ":material/link_off:", "circle-check": ":material/check_circle:", "info": ":material/info:"}
 
 
 def material(name: str) -> str | None:

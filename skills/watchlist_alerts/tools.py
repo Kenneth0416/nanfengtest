@@ -73,9 +73,12 @@ def add_watch_rule(ctx, args):
     op = args.get("operator", ">")
     value = float(args["value"])
     label = args.get("label") or f"{market} {tx.METRICS[metric]['label'].lower()} {op} {tx.fmt_value(metric, value)}"
-    rid = ctx.store.add_watch_rule("team", market, metric, op, value, label, ctx.role)
-    return {"summary": f"Team alert #{rid} saved: {label}. It is checked every time data refreshes and shows "
-                       "for the whole team.",
+    team = bool(args.get("share_with_team"))
+    rid = ctx.store.add_watch_rule("team" if team else ctx.role, market, metric, op, value, label, ctx.role)
+    return {"summary": (f"Team alert #{rid} saved: {label}. It is checked every time data refreshes and shows for "
+                        "the whole team." if team else
+                        f"Alert #{rid} saved for you: {label}. It is checked every time data refreshes and fires in "
+                        "your 'For you' view; 'Share with team' on Monitor gives it to everyone."),
             "data": {"id": rid, "market": market, "metric": metric, "op": op, "value": value}}
 
 
@@ -105,10 +108,12 @@ TOOLS = [
          obj_schema({"scope": {"type": "string", "enum": ["team", "me"]},
                      "kind": {"type": "string", "enum": ["metric_move", "vs_long_term", "news", "pipeline", "macro", "data_quality", "alert"]},
                      "limit": {"type": "integer"}}), get_signals),
-    Tool("add_watch_rule", "Save an alert that fires when a metric crosses a threshold in a market.",
+    Tool("add_watch_rule", "Save an alert that fires when a metric crosses a threshold in a market. It belongs to "
+         "the asking person unless they ask for the whole team (share_with_team).",
          obj_schema({"market": {"type": "string"}, "metric": {"type": "string", "enum": METRIC_ENUM},
                      "operator": {"type": "string", "enum": [">", "<", ">=", "<="]}, "value": {"type": "number"},
-                     "label": {"type": "string"}}, ["market", "metric", "operator", "value"]), add_watch_rule),
+                     "label": {"type": "string"}, "share_with_team": {"type": "boolean"}},
+                    ["market", "metric", "operator", "value"]), add_watch_rule),
     Tool("update_focus", "Change which submarkets and measures the asking person's For you view covers, or how many "
          "signals they see, from a request such as 'more Fitzrovia and less macro' or 'only the top 3'.",
          obj_schema({"request": {"type": "string"}}, ["request"]), update_focus),

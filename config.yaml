@@ -54,7 +54,7 @@ connectors:                 # data sources (connectors/<module>.py)
 feeds:
   - {name: Bank of England Bank Rate, what: "Bank Rate, every change since 2023", publisher: Bank of England, licence: Open Government Licence, cadence: daily, connector: boe_bank_rate}
   - {name: London office news (RSS), what: "Lettings, deals, supply and macro stories", publisher: Google News search feeds, licence: "Headlines and links only", cadence: daily, connector: news_rss}
-  - {name: ONS labour market, what: "Employment and unemployment, London", publisher: Office for National Statistics, licence: Open Government Licence, cadence: monthly, connector: seed_research, note: "Snapshot in the seed data; live connector is next"}
+  - {name: ONS labour market, what: "Employment and unemployment, London", publisher: Office for National Statistics, licence: Open Government Licence, cadence: monthly, note: "Snapshot (Mar-May 2026) in the seed data only; the live connector is not built yet"}
   - {name: Nomis workplace employment, what: "London jobs in finance, tech, professional services", publisher: ONS / Nomis, licence: Open Government Licence, cadence: annual, note: "Planned"}
   - {name: City of London development pipeline, what: "Office schemes over 1,000 sq m: permitted, under construction, due dates", publisher: City of London Corporation, licence: Open Government Licence, cadence: quarterly, note: "Planned"}
   - {name: London Development Database, what: "Planning permissions, starts and completions across London", publisher: Greater London Authority, licence: Open Government Licence, cadence: weekly, note: "Planned"}

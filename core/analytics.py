@@ -12,6 +12,12 @@ def quarter_end(period: str) -> date:
     return date(y, q * 3, 30 if q in (2, 3) else 31)
 
 
+def quarters_ago(today: date, n: int) -> str:
+    """The quarter label n quarters before today's quarter, e.g. 2026Q2 -> 2025Q4 for n=2."""
+    q = (today.year * 4 + (today.month - 1) // 3) - n
+    return f"{q // 4}Q{q % 4 + 1}"
+
+
 def period_label(period: str) -> str:
     return f"Q{period[-1]} {period[:4]}" if len(period) == 6 and period[4] == "Q" else period
 

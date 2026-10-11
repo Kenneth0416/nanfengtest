@@ -261,9 +261,10 @@ def _refine_with_llm(llm, description, proposal) -> dict:
 
 
 def apply_setup(store, user: str, proposal: dict) -> dict:
-    """Save the focus and add the rules; returns what Undo needs."""
+    """Save the focus and add the rules as this person's own alerts (they fire in 'For you'; 'Share with team'
+    on Monitor makes one the team's); returns what Undo needs."""
     store.save_focus(user, proposal["focus"])
-    ids = [store.add_watch_rule("team", r["market"], r["metric"], r["operator"], r["value"], r["label"], user)
+    ids = [store.add_watch_rule(user, r["market"], r["metric"], r["operator"], r["value"], r["label"], user)
            for r in proposal.get("rules", [])]
     return {"rule_ids": ids}
 

@@ -120,6 +120,8 @@ a.loa-chip { text-decoration:none; }
 .loa-prose { font-size:16px; line-height:1.55; color:var(--ink); }
 .loa-team { border:1px solid var(--line); border-radius:6px; padding:12px 14px; font-size:13px; color:var(--ink2); background:var(--surface); }
 .loa-team b { color:var(--ink); font-size:14px; }
+.loa-notice { font-size:12px; color:var(--ink3); border-bottom:1px solid var(--line); padding:0 0 6px 0; margin:-8px 0 14px 0; }
+.loa-me { display:flex; align-items:center; gap:6px; font-size:14px; color:var(--ink); }
 .loa-logo { display:block; width:212px; max-width:100%; height:auto; margin:6px 0 2px 0; }
 .loa-logo-cap { font-size:12px; color:var(--ink3); margin:0 0 10px 0; }
 .loa-builtfor { margin:18px 0 4px 0; border-bottom:1px solid var(--line); padding-bottom:12px; }
@@ -317,14 +319,18 @@ def sidebar():
     with st.sidebar:
         st.html(brand_img("logo-horizontal.svg", "loa-logo", "London Office Market Agent")
                 + '<div class="loa-logo-cap">Prototype · sample data</div>')
-        user = st.text_input("Your name", key="me",
-                             help="Used for your own 'For you' view and to show the team who added what").strip() or "Guest"
+        c = st.columns([2.4, 2.1], vertical_alignment="center")
+        c[0].html(f'<div class="loa-me">{ic("user", 15, "accent")}<b>{esc(user)}</b></div>')
+        with c[1].popover("Change", width="stretch", help="Who is using this browser: no login, pick a name once"):
+            who_card("s", compact=True)
+            if user != "Guest" and st.button("Forget me", key="forget_me", type="tertiary"):
+                st.session_state["me"] = "Guest"
+                st.session_state["me_cleared"] = True
+                st.query_params.pop("me", None)
+                st.rerun()
         if user != "Guest" and st.query_params.get("me") != user:
             st.query_params["me"] = user
             st.session_state["me_cleared"] = False
-        elif user == "Guest" and st.query_params.get("me"):
-            del st.query_params["me"]  # the name was cleared on purpose: forget it in the browser too
-            st.session_state["me_cleared"] = True
         remember_me()
         st.html(kicker("Work"))
         st.page_link(PAGE_OBJ["monitor"], label="Monitor", icon=material("activity"), help="Stay ahead of the market")
@@ -334,9 +340,7 @@ def sidebar():
         st.page_link(PAGE_OBJ["sources"], label=f"Sources · {to_check} to check" if to_check else "Sources",
                      icon=material("database"), help="Data the agent maintains")
         st.html(f"""{kicker("Team")}
-<div class="loa-team"><b>{esc(team['name'])}</b><div style="margin:6px 0 8px 0">{avatars(colleagues(), user)}</div>
-One workspace and one set of data. Each person sets their own focus.<br><br>
-Anyone can upload a report; the whole team sees it.</div>""")
+<div class="loa-team"><b>{esc(team['name'])}</b><div style="margin:6px 0 0 0">{avatars(colleagues(), user)}</div></div>""")
         st.caption(f"**Data up to:** {an.period_label(an.latest_period(app.store))}")
         with st.expander("Technical details"):
             st.caption(f"Engine: {engine.status}")
@@ -362,15 +366,10 @@ def copilot_fab():
 def page_header(title: str, subtitle: str, extra: tuple | None = None):
     copilot_fab()
     follow_output()  # the page-level keyboard shortcut ("/") and follow-scrolling need the script on every page
-    c = st.columns([4, 1.6, 1.5] if extra else [4.5, 1.5], vertical_alignment="center")
-    c[0].html(f'<div class="loa-h1">{esc(title)}</div><div class="loa-sub">{esc(subtitle)}</div>')
-    if extra:
-        label, key, target = extra
-        if c[1].button(label, key=key, width="stretch"):
-            goto(target)
-    if c[-1].button("Ask Copilot", icon=material("message-square"), shortcut="ctrl+k", type="primary", width="stretch", key=f"ask_{title[:8]}",
-                    help="Shortcut: Ctrl+K"):
-        open_copilot()
+    st.html('<div class="loa-notice">Evaluation PoC: market figures are restated from public Knight Frank reports '
+            '(evaluation only, not for AI or commercial use); Bank Rate and news are collected live; internal deals '
+            'and colleague names are demo data.</div>')
+    st.html(f'<div class="loa-h1">{esc(title)}</div><div class="loa-sub">{esc(subtitle)}</div>')
 
 
 def chart(spec: dict | None):
@@ -403,8 +402,8 @@ def show_answer(ans, text_done: bool = False):
     sources = {(s.get("title"), s.get("url")) for step in ans.trace for s in step["result"].get("sources", []) or []}
     if sources:
         st.html("".join(chip(t, "src auto", u) for t, u in sorted(sources, key=lambda x: x[0] or "")))
-    with st.expander("How I worked this out"):
-        st.caption(f"Engine: {ans.engine} · tools: {', '.join(t['tool'] for t in ans.trace) or 'none'}")
+    if ans.trace:
+        st.caption(f"Tools used: {', '.join(dict.fromkeys(t['tool'] for t in ans.trace))}")
 
 
 # Runs in the page itself (not in the component's iframe, which Streamlit re-creates on every rerun and
@@ -477,6 +476,11 @@ FOLLOW_CORE = r"""(function () {
   observer.observe(doc.body, { childList: true, subtree: true, characterData: true });
   // "/" anywhere outside a text box puts the cursor in the Copilot's input (Ctrl+K opens the side panel)
   doc.addEventListener("keydown", (e) => {
+    if ((e.ctrlKey || e.metaKey) && !e.altKey && (e.key === "k" || e.key === "K")) {  // Ctrl+K: open the Copilot
+      const fab = doc.querySelector(".st-key-fab_copilot button");
+      if (fab) { e.preventDefault(); fab.click(); }
+      return;
+    }
     if (e.key !== "/" || e.ctrlKey || e.metaKey || e.altKey) { return; }
     const t = e.target;
     if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)) { return; }
@@ -701,11 +705,14 @@ def share_controls(turn):
             _rerun()
         c[1].caption(f"Shared with the team by {shared['author']} · {lib.when(shared['ts'])}")
     else:  # the chat on screen is always the viewer's own
-        if c[0].button("Share to team", icon=material("share-2"), key=f"share{mid}", type="tertiary",
-                       help="Only you can see this answer until you share it; sharing puts the question and "
-                            "answer in team activity with your name"):
-            app.store.share_answer(mid, user)
-            _rerun()
+        with c[0].popover("Share to team", icon=material("share-2"),
+                          help="Only you can see this answer until you share it; sharing puts the question, the "
+                               "answer, its charts and sources in team activity with your name"):
+            note = st.text_input("Why is it worth a look? (optional)", key=f"note{mid}", placeholder="e.g. IC needs this")
+            if st.button("Share", key=f"share{mid}", type="primary"):
+                app.store.share_answer(mid, user, note.strip())
+                _rerun()
+
 
 
 def copilot_thread(turns, ctx, question):
@@ -872,15 +879,14 @@ def setup_card(p):
                     f"- **Measures:** {', '.join(fx.MEASURES[m] for m in f['measures'])}\n"
                     f"- **How much:** {fx.BUDGETS[f['budget']]}\n"
                     f"- **'Why it matters' written for:** {fx.LENSES[f.get('lens', 'team')]}" +
-                    "".join(f"\n- **Team alert:** {r['label']} ({r['why']})" for r in p["rules"]))
+                    "".join(f"\n- **Your alert:** {r['label']} ({r['why']})" for r in p["rules"]))
         st.caption(" ".join(p["reasons"]))
         c = st.columns(3)
         if c[0].button("Apply", type="primary", width="stretch", key="apply_setup"):
             st.session_state["applied_setup"] = fx.apply_setup(app.store, user, p)
             st.session_state.pop("proposal")
-            app.store.log("setup", user, "set up their 'For you' view")
             say("assistant", "Applied. Monitor now opens on 'For you'"
-                f"{', and ' + str(len(p['rules'])) + ' alert(s) are on the team watchlist' if p['rules'] else ''}. "
+                f"{', with ' + str(len(p['rules'])) + ' alert(s) of your own (Share with team on Monitor gives one to everyone)' if p['rules'] else ''}. "
                 "Tell me what to change, e.g. 'less macro'.")
             st.session_state["undo_ready"] = True
             st.session_state["want_view"] = "For you"  # applied on the next full run, before the toggle exists
@@ -912,7 +918,7 @@ def signal_chips(s) -> str:
     if s.flag:
         out.append(chip("Check source", "warn"))
     if s.hot >= 60:
-        out.append(f'<span class="loa-chip warn">{ic("flame", 12)}Hot {s.hot}</span>')
+        out.append(chip("Important", "warn"))
     if s.shared_by:
         out.append(chip("Shared by " + ", ".join(x["who"] for x in s.shared_by[:2]), "ok"))
     return "".join(out)
@@ -941,9 +947,8 @@ def signal_card(s, i, lens="team"):
     why = esc(s.why)
     if (extra := fx.for_you(s, lens)):
         why += f' <i class="loa-muted">For you: {esc(extra)}</i>'
-    if s.hot:
-        why += f'<div class="loa-muted">{ic("flame", 13, "amber")}{esc(s.why_hot or "routine")}' \
-               + (f" · first seen {esc(s.discovered)} UTC" if s.discovered else "") + "</div>"
+    if s.hot >= 60 and s.why_hot:
+        why += f'<div class="loa-muted">{esc(s.why_hot)}</div>'
     if s.flag:
         why += f'<div class="loa-muted">{ic("triangle-alert", 13, "flag")}{esc(s.flag)}. Anyone can settle it on Sources.</div>'
     with st.container(border=True):
@@ -959,7 +964,7 @@ def signal_card(s, i, lens="team"):
     <div style="margin-top:10px">{"".join(src_chip(e) for e in s.evidence)}</div>
   </div>
 </div>""")
-        b = st.columns([1.4, 1.6, 0.6, 0.6, 1.6], vertical_alignment="center")
+        b = st.columns([1.4, 1.6, 1.4, 1.6], vertical_alignment="center")
         if b[0].button("Ask Copilot", key=f"ask{i}{s.id}", type="tertiary"):
             open_copilot({"kind": "signal", "title": s.title, "detail": s.detail})
         if s.id in in_brief:
@@ -971,15 +976,13 @@ def signal_card(s, i, lens="team"):
             app.store.add_to_brief(s.to_dict(), user)
             app.store.log("brief", user, f"added '{s.title}' to the team brief")
             st.rerun()
-        if b[2].button("", icon=material("thumbs-up"), key=f"up{i}{s.id}", type="tertiary", help="Useful: rank more like this higher for you"):
-            app.store.add_feedback(s.id, user, 1)
-            st.toast("Thanks, noted.")
-        if b[3].button("", icon=material("thumbs-down"), key=f"dn{i}{s.id}", type="tertiary", help="Not relevant to me: hide it from my views"):
+        if b[2].button("Hide for me", icon=material("eye-off"), key=f"dn{i}{s.id}", type="tertiary",
+                       help="Not relevant to you: hides it from your views only"):
             app.store.add_feedback(s.id, user, -1)
             st.toast("Hidden for you. The rest of the team still sees it.")
             st.rerun()
         if s.obs_id and not s.flag:
-            with b[4].popover("Looks wrong", icon=material("triangle-alert"), help="Flag this number for the team. It stays usable with a warning "
+            with b[3].popover("Looks wrong", icon=material("triangle-alert"), help="Flag this number for the team. It stays usable with a warning "
                                                      "until someone checks it."):
                 why_txt = st.text_input("What looks wrong?", key=f"why{i}{s.id}",
                                         placeholder="Doesn't match the PDF; looks like the City figure")
@@ -995,43 +998,46 @@ def share_panel():
     merges it with the same story if the team has it, credits the colleague and scores how hot it is."""
     with st.container(border=True):
         st.html(f'<div class="loa-h2" style="font-size:17px">{ic("megaphone", 16, "accent")}Share a link or tip</div>')
-        st.caption("Paste a link or write what you heard. It goes into the team inbox; the agent files it with "
-                   "your name and merges it if a colleague shared the same thing.")
         with st.form("share", clear_on_submit=True, border=False):
             text = st.text_area("What did you see or hear?", height=70, label_visibility="collapsed",
-                                placeholder="e.g. A broker told me 1 Triton Square has another floor under offer…")
-            url = st.text_input("Link (optional)", placeholder="https://…")
-            how = st.selectbox("Source", gather.HOW)
+                                placeholder="A link, or what you heard: e.g. a broker says another floor at "
+                                            "Triton Square is under offer")
             sent = st.form_submit_button("Share with the team", type="primary", width="stretch")
-        if sent and (text.strip() or url.strip()):
-            app.store.add_to_inbox(text.strip(), url.strip(), how, user)
+        if sent and text.strip():
+            m = re.search(r"https?://\S+", text)
+            url = m.group(0) if m else ""
+            how = gather.HOW[2] if url else (gather.HOW[0] if re.search(r"\bbroker|agent\b", text, re.I) else gather.HOW[-1])
+            app.store.add_to_inbox(text.replace(url, "").strip() or url, url, how, user)
             with st.spinner("Reading, checking for the same story, scoring…"):
                 try:
                     st.success(engine.gather(user).text or "Shared. The information agent filed it; see team activity.")
                 except AgentUnavailable as e:
                     st.info(f"Saved to the team inbox. The information agent files it on its next round. ({e})")
-        shared = [n for n in app.store.news() if n.shared_by][:3]
-        for n in shared:
-            who = n.shared_by[0]
-            st.html(f'<div style="margin-top:8px"><b>{esc(n.title)}</b><div class="loa-muted">Shared by '
-                    f'{esc(who["who"])} ({esc(who["how"]).lower()}) · {esc(", ".join(n.markets[:1]) or "London")} · '
-                    f'{esc(lib.when(who.get("when")))}</div></div>')
 
 
 def watching_panel():
+    """Alerts: a person's own rules fire in their 'For you' view; one becomes the team's only when its owner
+    shares it, and only its owner can remove a team rule."""
     with st.container(border=True):
-        st.html('<div class="loa-h2" style="font-size:17px">Watching for the team</div>')
-        fired = {s.title for s in signals.watch_alerts("team")}
-        rules = app.store.watch_rules("team")
+        st.html('<div class="loa-h2" style="font-size:17px">Alerts</div>')
+        fired = {s.title for s in signals.watch_alerts("team") + signals.watch_alerts(user)}
+        rules = app.store.watch_rules(user) + app.store.watch_rules("team")
         if not rules:
-            st.caption("No rules yet. Add one below in your own words.")
+            st.caption("No rules yet. Add one below in your own words; it is yours until you share it.")
         for rr in rules:
             on = f"Alert: {rr['label']}" in fired
-            c = st.columns([5, 1.2], vertical_alignment="center")
+            mine = rr["role"] != "team"
+            owner = rr.get("author") or ""
+            c = st.columns([4, 1.3, 1.3], vertical_alignment="center")
             c[0].html(f'<span class="loa-dot {"red" if on else "green"}"></span><b>{esc(rr["label"])}</b>'
-                      f'<div class="loa-muted" style="margin-left:17px">{"Fired" if on else "Not triggered"}'
-                      + (f" · added by {esc(rr['author'])}" if rr.get("author") else "") + "</div>")
-            if c[1].button("Remove", key=f"del{rr['id']}", type="tertiary"):
+                      f'<div class="loa-muted" style="margin-left:17px">{"Fired" if on else "Not triggered"} · '
+                      + ("yours" if mine else "team" + (f", shared by {esc(owner)}" if owner else "")) + "</div>")
+            if mine and c[1].button("Share with team", key=f"shr{rr['id']}", type="tertiary",
+                                    help="Everyone then sees it and gets the alert"):
+                app.store.share_watch_rule(rr["id"])
+                app.store.log("alert", user, f"shared the alert '{rr['label']}' with the team")
+                st.rerun()
+            if (mine or owner in ("", user)) and c[2].button("Remove", key=f"del{rr['id']}", type="tertiary"):
                 app.store.delete_watch_rule(rr["id"])
                 st.rerun()
         st.html(kicker("Add a rule in your own words"))
@@ -1060,37 +1066,35 @@ def watching_panel():
             st.warning("I couldn't find a market, measure and number in that. Try 'City vacancy above 9%'.")
         if save and rule:
             st.success(app.call("add_watch_rule", rule, user)["summary"])
-            app.store.log("alert", user, f"added the alert '{text}'")
             st.rerun()
-        st.caption("Fired alerts show on Monitor. Email and Teams delivery come after the PoC.")
+        st.caption("Your alerts fire in 'For you'; a shared one shows for the whole team. Email and Teams delivery "
+                   "come after the PoC.")
 
 
-def needs_a_person_panel():
-    with st.container(border=True):
-        st.html(f'<div class="loa-h2" style="font-size:17px">Needs a person'
-                + (f'<span class="loa-badge">{to_check}</span>' if to_check else "") + "</div>")
-        st.caption("Open data arrives by itself and anyone can upload a report. When figures disagree, anyone on "
-                   "the team can settle it; until then they show as flagged.")
-        if not to_check:
-            st.html(f'{chip("Nothing to check", "ok")}')
-        for r in flagged[:3]:
-            label = tx.METRICS[r["metric"]]["label"].lower()
-            c = st.columns([3, 1.3], vertical_alignment="center")
-            c[0].html(f'<span class="loa-dot amber"></span><b style="font-size:14px">{esc(r["market"])} {esc(label)}, '
-                      f'{esc(an.period_label(r["period"]))}</b><div class="loa-muted" style="margin-left:17px">'
-                      f'{esc(an.warning(r).removeprefix("Flagged: "))}</div>')
-            if c[1].button(f"Keep {tx.fmt_value(r['metric'], r['value'])}", key=f"keep{r['rowid']}", width="stretch"):
-                app.store.resolve_observation(r["rowid"], user, True)
-                app.store.log("resolve", user, f"checked {r['market']} {label}: correct")
-                st.rerun()
-        for s in checks[:3 - min(3, len(flagged))]:
-            c = st.columns([3, 1.3], vertical_alignment="center")
-            c[0].html(f'<span class="loa-dot amber"></span><b style="font-size:14px">{esc(s.title)}</b>'
-                      f'<div class="loa-muted" style="margin-left:17px">{esc(s.detail)}</div>')
-            if c[1].button("Review", key=f"rev{s.id}", width="stretch"):
-                open_copilot({"kind": "signal", "title": s.title, "detail": s.detail})
-        if st.button("Open Sources", key="open_sources"):
-            goto("sources")
+def shared_answer_entry(a, when):
+    """One shared Copilot answer in team activity: the question, the sharer's reason, the answer with its charts
+    and sources; a colleague can carry it into their own Copilot; only the sharer can unshare it."""
+    with st.expander(f"{a['author']} shared: {a['text'][:60]}", icon=material("share-2")):
+        st.caption(f"Shared by {a['author']} · {when}" + (f" · \"{a['note']}\"" if a.get("note") else ""))
+        m = app.store.shared_answer(a.get("ref") or "")
+        if not (m or {}).get("content", "").lstrip("*#_ ").startswith(a["text"][:40]):  # unless the answer repeats it
+            st.markdown(f"**{a['text']}**")
+        if m:
+            show_answer(Answer(m["content"], m["trace"], m["engine"]))
+        else:
+            st.markdown(a["answer"] or "")
+        c = st.columns(2)
+        if c[0].button("Continue in my Copilot", icon=material("message-square"), key=f"cont{a['id']}", type="tertiary",
+                       help="Starts a new conversation of your own with this question and answer in it"):
+            chat_id = app.store.new_chat(chat_owner(), a["text"])
+            app.store.add_chat_message(chat_id, "user", a["text"])
+            app.store.add_chat_message(chat_id, "assistant", m["content"] if m else (a["answer"] or ""),
+                                       m["trace"] if m else None, m["engine"] if m else "")
+            open_chat(chat_id)
+            open_copilot()
+        if a["author"] == user and c[1].button("Unshare", icon=material("link-off"), key=f"unsh{a['id']}", type="tertiary"):
+            app.store.unshare_answer(int(a["ref"]))
+            st.rerun()
 
 
 def activity_panel():
@@ -1098,18 +1102,15 @@ def activity_panel():
         st.html('<div class="loa-h2" style="font-size:17px">Team activity</div>')
         acts = app.store.activity(8)
         if not acts:
-            st.caption("Nothing yet. Uploads, checks, alerts, brief picks and the Copilot answers colleagues choose "
-                       "to share show here.")
+            st.caption("Nothing yet. Uploads, checks, shared alerts, brief picks and the Copilot answers colleagues "
+                       "choose to share show here.")
         for a in acts:
             when = lib.when(a.get("ts"))
             if a["kind"] == "auto":
                 st.html(f'<div><span class="loa-dot green"></span>Auto-update: {esc(a["text"])}'
                         f'<div class="loa-muted" style="margin-left:17px">{esc(when)}</div></div>')
             elif a["kind"] == "ask":  # a Copilot answer its owner chose to share
-                with st.expander(f"{a['author']} shared: {a['text'][:60]}", icon=material("share-2")):
-                    st.caption(f"Shared by {a['author']} · {when}")
-                    ans = a["answer"] or ""
-                    st.markdown(ans if len(ans) <= 700 else ans[:700].rsplit(" ", 1)[0] + " …")
+                shared_answer_entry(a, when)
             else:
                 dot = '<span class="loa-dot blue" style="margin-right:4px"></span>' if a["kind"] == "internal" else ""
                 st.html(f'<div style="display:flex;gap:8px;margin:6px 0"><span class="loa-av">'
@@ -1121,26 +1122,10 @@ def freshness_line():
     """Where the team's data stands, in one strip: open data collected by the agent, the latest report a
     colleague uploaded, when news was checked, what waits for a person, and reports probably out but not uploaded."""
     last = lib.last_auto_update(app.store)
-    up = lib.latest_upload(app.store)
     due = [d for d in lib.due_reports(app.store, app.config) if d["missing"]]
     fdue = follow.due_uploads(app.store)
     parts = [f'<span><span class="loa-dot green"></span><b>Auto-updated</b> {esc(lib.when(last["ts"]) if last else "never")}</span>']
-    if up:
-        parts.append(f'<span><span class="loa-dot orange"></span><b>Uploaded</b> {esc(up["publisher"])} '
-                     f'{esc(an.period_label(up["period"]))}, by {esc(up["uploaded_by"])} on {esc(up["uploaded_at"][:10])}</span>')
-    else:
-        parts.append('<span><span class="loa-dot orange"></span><b>No reports uploaded yet</b></span>')
-    if our_deals:
-        latest = max((d.get("date") or "" for d in our_deals), default="")
-        parts.append(f'<span><span class="loa-dot blue"></span><b>Internal</b> {len(our_deals)} of our deals'
-                     + (f', latest {esc(latest)}' if latest else "")
-                     + (" · internal only" if all(d.get("confidentiality") != "quotable" for d in our_deals)
-                        else f" · {sum(d.get('confidentiality') == 'quotable' for d in our_deals)} quotable") + "</span>")
-    else:
-        parts.append('<span><span class="loa-dot blue"></span><b>Internal</b> none of our deals recorded yet</span>')
-    news = app.store.news()
-    if news:
-        parts.append(f'<span><b>News</b> {len(news)} items, checked {esc(lib.when(last["ts"]) if last else "never")}</span>')
+    parts.append(f'<span><b>Market data to</b> {esc(an.period_label(an.latest_period(app.store)))}</span>')
     if to_check:
         parts.append(f'<span>{ic("triangle-alert", 14, "flag")}<b>{to_check} to check</b> on Sources</span>')
     for d in due:
@@ -1164,6 +1149,13 @@ def summary_card(team_sigs):
             ref = an.source_ref(app.store, snap["source_id"])
             if ref["title"] not in [c[0] for c in chips]:
                 chips.append((ref["title"], ref["channel"], ref["url"]))
+    from core.summary import lta_source
+    for m in ("take_up_msqft", "investment_gbp_bn"):  # the long-term averages may come from an older report
+        sid = lta_source(app.store, "London", m)
+        if sid and sid not in {s.get("source_id") for s in (vac, inv) if s}:
+            ref = an.source_ref(app.store, sid)
+            if f"Long-term averages: {ref['title']}" not in [c[0] for c in chips]:
+                chips.append((f"Long-term averages: {ref['title']}", ref["channel"], ref["url"]))
     with st.container(border=True):
         st.html(kicker("Team summary")
                 + f'<div class="loa-prose">{esc(" ".join(team_summary(app.store, team_sigs)))}</div>'
@@ -1171,8 +1163,14 @@ def summary_card(team_sigs):
                 + "".join(chip(t, "src auto" if ch == "auto" else "src", u) for t, ch, u in chips) + "</div>")
 
 
-def focus_row(mine):
+def focus_row(mine, n_hidden: int = 0):
     c = st.columns([5, 1.6], vertical_alignment="center")
+    if n_hidden:
+        with c[0]:
+            if st.button(f"Show {n_hidden} hidden", icon=material("eye"), key="unhide", type="tertiary",
+                         help="Signals you hid with 'Hide for me'"):
+                app.store.unhide_signals(user)
+                st.rerun()
     if mine:
         chips = [chip(m) for m in mine["markets"]] + [chip(fx.MEASURES[m]) for m in mine["measures"]] \
                 + [chip(fx.BUDGETS[mine["budget"]].split(" (")[0])]
@@ -1188,8 +1186,8 @@ def focus_row(mine):
 
 def monitor_page():
     st.session_state["page"] = "monitor"
-    page_header("This week in London offices", f"{date.today():%A %-d %b %Y} · shared with the whole team",
-                (f"Team brief · {brief_count} signals", "to_brief", "brief"))
+    page_header("This week in London offices", f"{date.today():%A %-d %b %Y} · market data to "
+                f"{an.period_label(an.latest_period(app.store))} · rates and news to date · shared with the whole team")
     freshness_line()
     hidden = app.store.hidden_signals(user)
     team_sigs = [s for s in signals.for_role("team") if s.id not in hidden]
@@ -1205,14 +1203,21 @@ def monitor_page():
         with h[1]:
             view = st.segmented_control("Show", ["For you", "Whole team"], key="view", label_visibility="collapsed",
                                         format_func=lambda v: f"Whole team · {len(team_sigs)}" if v == "Whole team" else v)
-        focus_row(mine)
+        focus_row(mine, len(hidden))
         if view == "For you" and mine:
             sigs, lens = signals.for_focus(user, mine), mine.get("lens", "team")
         else:
             if view == "For you":
                 st.info("You haven't set up your view yet. Press 'Set up my focus' and describe your job in one "
                         "sentence. Meanwhile, here is the whole team's list.")
-            sigs, lens = team_sigs[:8], "team"
+            show_all = st.session_state.get("show_all_signals")
+            sigs, lens = (team_sigs if show_all else team_sigs[:8]), "team"
+            if len(team_sigs) > 8:
+                c = st.columns([3, 1.4], vertical_alignment="center")
+                c[0].caption(f"{'All' if show_all else 'Top 8 of'} {len(team_sigs)} signals, ranked by what changed most")
+                if c[1].button("Show top 8" if show_all else f"Show all {len(team_sigs)}", key="show_all", type="tertiary"):
+                    st.session_state["show_all_signals"] = not show_all
+                    st.rerun()
         if not sigs:
             st.info("Nothing in your focus changed. Widen it by telling the Copilot, e.g. 'more vacancy'.")
         for i, s in enumerate(sigs):
@@ -1220,7 +1225,6 @@ def monitor_page():
     with side:
         share_panel()
         watching_panel()
-        needs_a_person_panel()
         activity_panel()
 
 
@@ -1229,11 +1233,8 @@ def copilot_page():
     st.session_state["page"] = "copilot"
     st.session_state["_in_dialog"] = False
     st.session_state["copilot_ctx"] = {"kind": "page", "page": "copilot"}
-    c = st.columns([5, 1.2], vertical_alignment="center")
-    c[0].html('<div class="loa-h1">Ask Copilot</div><div class="loa-sub">Judge: ask, compare, drill down. '
-              'Every number comes with its source.</div>')
-    if c[1].button("Set up my focus", icon=material("sparkles"), width="stretch", key="setup_cp"):
-        open_copilot({"kind": "setup"})
+    st.html('<div class="loa-h1">Ask Copilot</div><div class="loa-sub">Judge: ask, compare, drill down. '
+            'Every number comes with its source.</div>')
     # The input box is made here, at page level, so Streamlit pins it to the bottom of the window.
     question = st.chat_input(chat_placeholder(st.session_state["copilot_ctx"]), key="copilot_input", max_chars=2000)
     copilot_body(full=True, question=question, own_input=False)
@@ -1337,7 +1338,9 @@ def deck_panel(fmt):
                       + f'<div class="loa-muted">Press Build slides to get {esc(DECK_THEMES[theme].split(" · ")[0])}; '
                         f'the last build was {esc(DECK_THEMES[built_theme].split(" · ")[0])}.</div>')
         else:
-            c[3].caption("Five house themes, 13 layouts, every number footnoted and checked against the data.")
+            c[3].caption("Five house themes, 13 layouts, every number footnoted and checked against the data. For a "
+                         "deck this button does not give you, ask Copilot: \"a client update on the forest theme that "
+                         "only covers Midtown\".")
         st.html(theme_swatches())
 
 
@@ -1359,36 +1362,27 @@ def brief_page():
                 "Monitor to choose them.")
     if st.button("Add more from Monitor", type="tertiary", key="more_from_monitor"):
         goto("monitor")
-    row = st.columns([2.6, 1.3, 1.1, 0.9], vertical_alignment="center")
+    row = st.columns([3.8, 1.2], vertical_alignment="center")
     with row[0]:
         fmt = st.segmented_control("Write it as", list(fx.BRIEF_FORMATS), default="board",
                                    format_func=fx.BRIEF_FORMATS.get, key="brief_fmt") or "board"
         st.caption(FORMAT_HELP[fmt])
     key = (fmt, tuple(it["id"] for it in items))
-    rewrite = row[3].button("Rewrite", icon=material("refresh-cw"), key="rewrite", type="tertiary")
-    if st.session_state.get("brief_key") != key or rewrite:
+    if st.session_state.get("brief_key") != key:  # the text follows the picked signals and the format; same picks, same text
         with st.spinner("Writing the brief…"):
             st.session_state["brief"] = app.call("generate_brief", {"format": fmt}, user)["summary"]
             st.session_state["brief_key"] = key
-        if rewrite:
-            app.store.log("brief", user, f"rewrote the team brief ({fx.BRIEF_FORMATS[fmt].lower()})")
     brief = st.session_state["brief"]
-    with row[1].popover("Copy as Markdown", width="stretch"):
-        st.code(brief, language="markdown")
-    row[2].download_button("Download (.md)", brief, file_name="london-office-team-brief.md", width="stretch")
+    row[1].download_button("Download (.md)", brief, file_name="london-office-team-brief.md", width="stretch")
     deck_panel(fmt)
     with st.container(border=True):
         st.html(f'<div class="loa-cobrand">{brand_img("cobrand-nanfung.svg", "", "London Office Market Agent · Nan Fung Group")}'
                 f'<span>{esc(fx.BRIEF_FORMATS[fmt])}</span></div>')
         st.markdown(re.sub(r"^(#{1,2}) ", lambda m: "#" * (len(m.group(1)) + 2) + " ", brief, flags=re.M))
-        chart(app.call("get_metric_trend", {"market": "London", "metric": "vacancy_pct"})["chart"])
-    c = st.columns([2.2, 4.8], vertical_alignment="center")
-    if c[0].button("Ask Copilot for a custom deck", icon=material("sparkles"), type="tertiary", key="deck_copilot",
-                   help="Say who it is for, the theme and what to cover; the Copilot writes the storyline and "
-                        "checks every number against the data"):
-        open_copilot({"kind": "page", "page": "brief"})
-    c[1].caption("For a deck the Build button does not give you, e.g. \"a client update on the forest theme that only "
-                 "covers Midtown\". Build slides above is the one-click version.")
+        # the chart follows the first picked signal that has a metric; London vacancy when nothing is picked
+        lead = next((it for it in items if it.get("metric")), None)
+        market = (lead or {}).get("markets", ["London"])[0] if lead else "London"
+        chart(app.call("get_metric_trend", {"market": market, "metric": (lead or {}).get("metric") or "vacancy_pct"})["chart"])
 
 
 # ---------------------------------------------------------------- sources
@@ -1396,56 +1390,41 @@ STATUS = {"verified": "in page text", "image": "image only", "not_found": "not i
           "implausible": "outside range (check)"}
 FOLLOW_EXAMPLES = ["Follow Savills Market Watch", "Landsec half-year results", "TfL station entries",
                    "https://www.costar.co.uk/news/rss"]
-LIB_TABS = ["Collected automatically", "Uploaded reports", "Internal data", "News and tips", "Definitions"]
+LIB_TABS = ["Collected automatically", "Uploaded reports", "Internal data", "News and tips"]
 
 
-def overview_cards():
+def overview_line():
+    """One line of counts for the three kinds of source; the tabs below hold the detail."""
     feeds = lib.feeds(app.store, app.config)
     live = [f for f in feeds if f.get("connector")]
-    planned = len(feeds) - len(live)
-    due = [d for d in lib.due_reports(app.store, app.config) if d["missing"]]
-    c = st.columns(3)
-    with c[0], st.container(border=True):
-        st.html(f'<div><span class="loa-dot green"></span><b>Collected automatically</b></div>'
-                f'<div class="loa-big">{len(live)} live feeds · {planned} planned</div>'
-                f'<div class="loa-ink2">{esc(", ".join(sorted({f["publisher"] for f in live if f.get("connector") != "followed_sources"})))}. '
-                f'Fetched and read by the agent on a schedule.</div>')
-        if st.button("See feeds", type="tertiary", key="see_feeds"):
-            st.session_state["want_lib"] = LIB_TABS[0]
-            st.rerun()
-    with c[1], st.container(border=True):
-        st.html('<div><span class="loa-dot orange"></span><b>Uploaded by the team</b></div>'
-                '<div class="loa-big">Anyone can upload</div>'
-                '<div class="loa-ink2">Agency reports whose licence does not allow automated collection (Knight '
-                'Frank, Savills, BNP Paribas…). One person uploads, everyone sees it, labelled with who and when.</div>'
-                + "".join(f'<div class="loa-ink2" style="margin-top:6px">{ic("alarm-clock", 14, "amber")}<b>{esc(d["publisher"])} '
-                          f'{esc(an.period_label(d["period"]))}</b> may be out; nobody has uploaded it yet.</div>'
-                          for d in due))
-        if st.button("Upload a report", type="tertiary", key="upload_btn"):
-            st.session_state["want_lib"] = LIB_TABS[1]
-            st.rerun()
-    with c[2], st.container(border=True):
-        st.html(f'<div><span class="loa-dot blue"></span><b>Internal data</b></div>'
-                f'<div class="loa-big">{len(our_deals)} of our deals</div>'
-                '<div class="loa-ink2">Our own lettings, leases and valuations. Any format: a PDF, a photo of a lease '
-                'page, an Excel export, or just tell Copilot. Stays inside the company, never mixed with market data.</div>'
-                + (f'<div class="loa-ink2" style="margin-top:6px"><b>{len(deal_drafts)} draft</b> with fields still missing '
-                   'or waiting for the recorder.</div>' if deal_drafts else ""))
-        if st.button("Add one of our deals", type="tertiary", key="internal_btn"):
-            st.session_state["want_lib"] = LIB_TABS[2]
-            st.rerun()
+    ups = app.store.uploads()
+    n_up = len(ups)
+    # the latest report a colleague uploaded; the seed's restated tables are not someone's upload
+    real = [u for u in ups if (u.get("uploaded_by") or "").lower() not in NOT_PEOPLE]
+    up = max(real, key=lambda u: u.get("uploaded_at") or "", default=None)
+    n_news = len(app.store.news())
+    quot = sum(d.get("confidentiality") == "quotable" for d in our_deals)
+    st.html('<div class="loa-fresh">'
+            f'<span>{tier("open", "Open data")} {len(live)} live feeds · {n_news} news items</span>'
+            f'<span>{tier("upl", "Uploaded")} {n_up} reports' + (f', latest {esc(up["publisher"])} {esc(an.period_label(up["period"]))} by {esc(up["uploaded_by"])}' if up else "") + '</span>'
+            f'<span>{tier("int", "Internal")} {len(our_deals)} of our deals' + (f", {len(deal_drafts)} draft" if deal_drafts else "")
+            + (f", {quot} quotable" if our_deals else "") + '</span></div>')
 
 
 def gathering_card():
     last = lib.last_auto_update(app.store)
     with st.container(border=True):
         c = st.columns([4, 1.6], vertical_alignment="center")
-        c[0].html(f'<b>{ic("search", 15, "accent")}Gathering round</b> <span class="loa-muted">runs daily · last '
+        c[0].html(f'<b>{ic("refresh-cw", 15, "accent")}Updates</b> <span class="loa-muted">daily on the server · last '
                   f'{esc(lib.when(last["ts"]) if last else "never")}</span>'
-                  '<div class="loa-ink2">One scheduled run: process what the team shared, collect open data, look '
-                  'for new agency reports by title (never downloading them), classify news.</div>')
-        if c[1].button("Run a gathering round", type="primary", width="stretch", key="run_round"):
-            with st.spinner("Gathering…"):
+                  '<div class="loa-ink2">Collects open data, files what the team shared, looks for new agency '
+                  'reports by title (never downloading them) and classifies news.</div>')
+        if c[1].button("Update now", type="primary", width="stretch", key="run_round", icon=material("refresh-cw")):
+            with st.spinner("Collecting open data…"):
+                reports = app.refresh(by=f"Auto-update (run by {user})")
+            for r in reports:
+                st.toast(f"{r['connector']}: {'failed' if r.get('error') else r['counts']}")
+            with st.spinner("Filing what the team shared…"):
                 try:
                     st.session_state["round"] = engine.gather(user)
                 except AgentUnavailable as e:
@@ -1525,14 +1504,13 @@ def agent_card():
     n_feeds = sum(1 for f in lib.feeds(app.store, app.config) if f.get("connector"))
     n_web = len(app.store.q("SELECT 1 FROM followed WHERE channel='auto'"))
     skills = app.info_manifest()["skills"]
-    with st.container(border=True):
+    with st.expander("Technical: how the agent processes sources"):
         st.html(f'<b>{ic("bot", 15, "accent")}One information-processing agent</b><div class="loa-ink2">The same agent collects and reads '
                 'everything: PDFs, web pages, news, spreadsheets and data feeds. It picks the skills each input '
                 'needs, so a new kind of source needs a new skill, not a new pipeline.</div><div style="margin-top:8px">'
                 + chip(f"This week: {n_pdf} PDFs") + chip(f"{n_news} news items") + chip(f"{n_feeds} data feeds")
                 + chip(f"{n_web} web pages followed") + "</div>")
-        with st.expander(f"Skills it uses ({len(skills)})"):
-            st.markdown("\n".join(f"- **{s['name']}**: {s['description']}" for s in skills))
+        st.markdown("\n".join(f"- **{s['name']}**: {s['description']}" for s in skills))
 
 
 def needs_a_person():
@@ -1592,16 +1570,15 @@ def feeds_tab():
     st.caption("Open data the agent collects by itself, because the licence allows it. A daily timer on the "
                "server runs it, and the app also collects on start-up if the last run is over "
                f"{app.config.get('auto_update_hours', 24)} hours old. Planned feeds are not built in this proof of concept.")
-    if st.button("Check for new data now", icon=material("refresh-cw"), key="refresh_now"):
-        with st.spinner("Collecting open data…"):
-            reports = app.refresh(by=f"Auto-update (run by {user})")
-        for r in reports:
-            st.toast(f"{r['connector']}: {'failed' if r.get('error') else r['counts']}")
-        st.rerun()
     df = pd.DataFrame([{"Feed": f["name"], "What": f.get("what", ""), "Licence": f["licence"], "Updates": f["cadence"],
                         "Last collected": f["last"], "Next": f["next"], "Status": f["status"]}
                        for f in lib.feeds(app.store, app.config)])
     st.dataframe(df, width="stretch", hide_index=True)
+    notes = [s for s in app.store.sources().values() if s.get("definition_note")]
+    if notes:
+        with st.expander(f"Definition notes ({len(notes)}): where a publisher changed what a series measures"):
+            for src in notes:
+                st.markdown(f"- **{src.get('publisher', '')} {an.period_label(src.get('period', ''))}**: {src['definition_note']}")
 
 
 def upload_section():
@@ -1719,6 +1696,8 @@ def deal_card(d: dict, key: str = "lib", compact: bool = False):
     draft = d.get("status") != "confirmed"
     status = chip("Draft · fields missing" if d.get("missing") else "Draft · to confirm", "warn") if draft else chip("Confirmed", "ok")
     level = chip(I.LEVELS[d.get("confidentiality", "internal")], "int")
+    if d.get("demo"):  # the three seed records: fictional deals and colleagues, so the inside/outside split shows
+        level += chip("Demo data", "warn")
     fields = "".join(f'<div><small>{esc(I.LABELS[k])}</small>{esc(d[k]) if d.get(k) else "<span class=empty>missing</span>"}</div>'
                      for k in I.FIELDS if k != "property")
     by = "; ".join(f"{esc(w)} ({esc(h)}, {esc(t)})" for w, h, t in d.get("recorded_by", []))
@@ -1831,14 +1810,9 @@ def sources_page():
     st.session_state["page"] = "sources"
     page_header("Sources", "Where the team's numbers come from. Open data arrives by itself; agency reports are "
                            "uploaded once, by anyone on the team, for everyone; our own deals stay internal and separate.")
-    st.html(f'<div class="loa-banner"><span style="margin-right:12px">{avatars(colleagues(), user)}</span>'
-            f'<b>One shared library, three kinds of source.</b> {tier("open", "Open data")}, public and collected automatically · '
-            f'{tier("upl", "Uploaded")} external reports · {tier("int", "Internal")}, our own deals and leases, never mixed with market data. Anyone can upload, record a '
-            'deal, settle a conflict or flag a number; it all feeds Monitor, Copilot and the team brief.</div>')
-    overview_cards()
+    overview_line()
     gathering_card()
     add_source_card()
-    agent_card()
     needs_a_person()
     if (want_lib := st.session_state.pop("want_lib", None)):
         st.session_state["lib_tab"] = want_lib
@@ -1853,20 +1827,13 @@ def sources_page():
     with t[LIB_TABS[3]]:
         st.caption("Incoming news and colleagues' tips, classified by category, submarket, theme, sentiment and "
                    "importance. The same story from several outlets or colleagues is merged, with everyone credited.")
-        rows = [{"Hot": n.hot, "Story": n.title, "Category": tx.CATEGORY_LABELS.get(n.category, n.category),
-                 "Markets": ", ".join(n.markets[:2]), "Source": n.source,
-                 "Shared by": ", ".join(f"{x['who']} ({x['how']})" for x in n.shared_by),
-                 "Also reported by": ", ".join(r["source"] for r in n.also_reported),
-                 "Why hot": n.why_hot, "Published": n.published} for n in app.store.news()]
+        rows = [{"Published": n.published, "Story": n.title, "Markets": ", ".join(n.markets[:2]), "Source": n.source,
+                 "Shared by": ", ".join(x["who"] for x in n.shared_by)} for n in app.store.news()]
         if rows:
-            st.dataframe(pd.DataFrame(rows).sort_values("Hot", ascending=False), width="stretch", hide_index=True)
+            st.dataframe(pd.DataFrame(rows).sort_values("Published", ascending=False), width="stretch", hide_index=True)
         else:
             st.caption("No news yet.")
-    with t[LIB_TABS[4]]:
-        st.caption("Every figure links back to one of these. Definition notes explain breaks between publishers "
-                   "or editions.")
-        src = pd.DataFrame(app.store.sources().values())
-        st.dataframe(src.drop(columns=["file_hash"], errors="ignore"), width="stretch", hide_index=True)
+    agent_card()
 
 
 # ---------------------------------------------------------------- navigation (left, like the prototype)

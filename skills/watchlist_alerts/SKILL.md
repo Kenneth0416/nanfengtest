@@ -5,7 +5,8 @@ description: The ranked "what changed" signals for the whole team or for one per
 Use for "what should I know this week", "any risks", "what changed". Default to scope "team";
 use scope "me" when the person asks about their own markets or "for me".
 When someone states a threshold in words, call add_watch_rule with market, metric, operator and
-value. Alerts belong to the whole team.
+value. An alert belongs to the person who asked and fires in their own view; pass
+share_with_team only when they say the whole team should get it.
 When someone asks to see more or less of a submarket or topic ("more Fitzrovia, less macro",
 "only rents and vacancy", "just the top 3"), call update_focus with their words. This changes only
 their own "For you" view.

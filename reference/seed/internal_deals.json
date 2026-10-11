@@ -1,16 +1,72 @@
 [
-  {"property": "8 Bishopsgate, 12th floor", "floor_area": "12th floor, 18,400 sq ft", "tenant": "Confidential (US law firm)",
-   "rent": "£72.50 psf", "term": "10 years", "rent_free": "24 months", "date": "2026-10-02",
-   "counterparty": "Landlord: Mitsubishi Estate", "submarket": "City Core", "confidentiality": "internal",
-   "status": "confirmed", "confirmed_by": "James",
-   "recorded_by": [["James", "said to Copilot", "2026-10-02"], ["James", "heads of terms (PDF)", "2026-10-03"]]},
-  {"property": "1 Triton Square, 4th floor", "floor_area": "4th floor", "tenant": "", "rent": "£95.00 psf", "term": "10 years",
-   "rent_free": "", "date": "2026-10-06", "counterparty": "", "submarket": "King's Cross/Euston",
-   "confidentiality": "quotable", "status": "draft",
-   "recorded_by": [["Sarah", "said to Copilot", "2026-10-06"]]},
-  {"property": "25 Cabot Square, 3rd floor", "floor_area": "3rd floor, 9,800 sq ft", "tenant": "Northbridge Capital",
-   "rent": "£52.00 psf", "term": "15 years", "rent_free": "30 months", "date": "2026-09-18",
-   "counterparty": "Agent: Cushman & Wakefield", "submarket": "Canary Wharf", "confidentiality": "quotable",
-   "status": "confirmed", "confirmed_by": "Priya",
-   "recorded_by": [["Priya", "spreadsheet deals_q3.xlsx", "2026-09-30"]]}
+ {
+  "property": "8 Bishopsgate, 12th floor",
+  "floor_area": "12th floor, 18,400 sq ft",
+  "tenant": "Confidential (US law firm)",
+  "rent": "£72.50 psf",
+  "term": "10 years",
+  "rent_free": "24 months",
+  "date": "2026-10-02",
+  "counterparty": "Landlord: Mitsubishi Estate",
+  "submarket": "City Core",
+  "confidentiality": "internal",
+  "status": "confirmed",
+  "confirmed_by": "James",
+  "recorded_by": [
+   [
+    "James",
+    "said to Copilot",
+    "2026-10-02"
+   ],
+   [
+    "James",
+    "heads of terms (PDF)",
+    "2026-10-03"
+   ]
+  ],
+  "demo": true
+ },
+ {
+  "property": "14 Granary Yard, 4th floor",
+  "floor_area": "4th floor",
+  "tenant": "",
+  "rent": "£95.00 psf",
+  "term": "10 years",
+  "rent_free": "",
+  "date": "2026-10-06",
+  "counterparty": "",
+  "submarket": "King's Cross/Euston",
+  "confidentiality": "quotable",
+  "status": "draft",
+  "recorded_by": [
+   [
+    "Sarah",
+    "said to Copilot",
+    "2026-10-06"
+   ]
+  ],
+  "demo": true
+ },
+ {
+  "property": "25 Cabot Square, 3rd floor",
+  "floor_area": "3rd floor, 9,800 sq ft",
+  "tenant": "Northbridge Capital",
+  "rent": "£52.00 psf",
+  "term": "15 years",
+  "rent_free": "30 months",
+  "date": "2026-09-18",
+  "counterparty": "Agent: Cushman & Wakefield",
+  "submarket": "Canary Wharf",
+  "confidentiality": "quotable",
+  "status": "confirmed",
+  "confirmed_by": "Priya",
+  "recorded_by": [
+   [
+    "Priya",
+    "spreadsheet deals_q3.xlsx",
+    "2026-09-30"
+   ]
+  ],
+  "demo": true
+ }
 ]

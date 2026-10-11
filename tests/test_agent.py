@@ -94,13 +94,23 @@ def test_agent_proposes_setup_and_applies_only_on_confirm(app):
     p = out["data"]
     assert p["focus"]["markets"] == ["Midtown", "City & Southbank"] and p["focus"]["brief_format"] == "ic"
     assert "investment" in p["focus"]["measures"] and p["rules"]
-    before = len(app.store.watch_rules("team"))
+    before, team_before = len(app.store.watch_rules(user)), len(app.store.watch_rules("team"))
     assert app.store.focus(user) is None  # nothing saved yet
     applied = app.call("apply_setup", {}, user)["data"]
-    assert app.focus(user) == p["focus"] and len(app.store.watch_rules("team")) == before + len(p["rules"])
+    # the proposed alerts are the person's own: they fire in 'For you' and never reach the team by themselves
+    assert app.focus(user) == p["focus"] and len(app.store.watch_rules(user)) == before + len(p["rules"])
+    assert len(app.store.watch_rules("team")) == team_before
+    rid = applied["rule_ids"][0]
+    app.store.share_watch_rule(rid)  # 'Share with team' on Monitor
+    assert len(app.store.watch_rules("team")) == team_before + 1 and len(app.store.watch_rules(user)) == before + len(p["rules"]) - 1
     from core import focus as fx
     fx.undo_setup(app.store, user, applied)
-    assert app.store.focus(user) is None and len(app.store.watch_rules("team")) == before
+    assert app.store.focus(user) is None and len(app.store.watch_rules("team")) == team_before
+    # the Copilot's own alert tool follows the same rule
+    out = app.call("add_watch_rule", {"market": "Midtown", "metric": "vacancy_pct", "operator": ">", "value": 9}, "priya")
+    assert "for you" in out["summary"] and app.store.watch_rules("priya")[-1]["id"] == out["data"]["id"]
+    out = app.call("add_watch_rule", {"market": "Midtown", "metric": "vacancy_pct", "operator": ">", "value": 9, "share_with_team": True}, "priya")
+    assert out["summary"].startswith("Team alert") and app.store.watch_rules("team")[-1]["id"] == out["data"]["id"]
 
 
 def test_team_brief_uses_added_signals_with_footnotes(app):
@@ -1381,3 +1391,45 @@ def test_copilot_answers_reach_team_activity_only_when_shared(app):
     assert app.store.shared_by(mid) is None and not [a for a in app.store.activity(50) if a["kind"] == "ask"]
     app.store.share_answer(mid - 1, "Kenneth")  # a question (user turn) cannot be shared on its own
     assert not [a for a in app.store.activity(50) if a["kind"] == "ask"]
+
+
+def test_team_activity_keeps_only_what_the_team_chose_to_share(app):
+    """Noise stays out: one auto-update line at most, no setup or deck-build entries, old unshared answers gone
+    after an upgrade; a shared answer carries its note and its trace (charts, sources) through shared_answer()."""
+    for n in range(3):
+        app.store.log("auto", "Auto-update", f"collected open data: run {n}")
+    acts = app.store.activity(50)
+    assert sum(a["kind"] == "auto" for a in acts) == 1 and "run 2" in next(a for a in acts if a["kind"] == "auto")["text"]
+    app.store.db.execute("INSERT INTO team_log (kind, author, text, answer) VALUES ('ask','Old','old question','old answer')")
+    app.store.db.execute("INSERT INTO team_log (kind, author, text) VALUES ('setup','Old','set up their view')")
+    app.store.db.commit()
+    from core.store import Store
+    again = Store(app.store.path)  # opening the database again runs the clean-up
+    kinds = {(a["kind"], a["author"]) for a in again.activity(100)}
+    assert ("ask", "Old") not in kinds and ("setup", "Old") not in kinds
+    chat = again.new_chat("Kenneth")
+    again.add_chat_message(chat, "user", "Trend?")
+    mid = again.add_chat_message(chat, "assistant", "Falling.", [{"tool": "get_metric_trend", "args": {}, "result": {"chart": {"x": [1]}}}], "pi")
+    again.share_answer(mid, "Kenneth", "IC needs this")
+    a = next(a for a in again.activity(10) if a["kind"] == "ask")
+    assert a["note"] == "IC needs this" and again.shared_answer(a["ref"])["trace"][0]["result"]["chart"] == {"x": [1]}
+
+
+def test_team_brief_is_the_same_for_every_reader(app):
+    """One team brief: a reader's own focus never changes it."""
+    app.store.save_focus("priya", {"markets": ["Canary Wharf"], "measures": ["vacancy"], "budget": "3", "brief_format": "ic", "lens": "team"})
+    a = app.call("generate_brief", {"format": "board"}, "priya")["summary"]
+    b = app.call("generate_brief", {"format": "board"}, "Kenneth")["summary"]
+    assert a == b
+    app.store.reset_focus("priya")
+
+
+def test_demo_deals_and_seed_news_say_what_they_are(app):
+    deals = app.store.internal_deals()
+    assert deals and all(d.get("demo") for d in deals), "the seed deals are marked as demo data"
+    assert not any("Triton" in d["property"] for d in deals), "no demo deal contradicts the public record"
+    assert not any(n.source.endswith("(seed)") for n in app.store.news())
+    from core import library as lib
+    assert all(f.get("connector") != "seed_research" for f in lib.feeds(app.store, app.config)), "ONS snapshot is not a live feed"
+    last = lib.last_auto_update(app.store)
+    assert "seed" not in last["text"] or "no live feeds" in last["text"]
