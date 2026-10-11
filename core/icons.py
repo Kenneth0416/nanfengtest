@@ -106,7 +106,7 @@ MATERIAL = {"activity": ":material/monitoring:", "message-square": ":material/ch
             "sparkles": ":material/auto_awesome:", "history": ":material/history:", "x": ":material/close:",
             "download": ":material/download:", "send": ":material/send:", "eye": ":material/visibility:",
             "presentation": ":material/co_present:", "upload": ":material/upload:", "wrench": ":material/build:",
-            "circle-x": ":material/cancel:", "share-2": ":material/share:", "eye-off": ":material/visibility_off:", "user": ":material/person:", "link-off": ":material/link_off:", "circle-check": ":material/check_circle:", "info": ":material/info:"}
+            "circle-x": ":material/cancel:", "chevron-down": ":material/expand_more:", "share-2": ":material/share:", "eye-off": ":material/visibility_off:", "user": ":material/person:", "link-off": ":material/link_off:", "circle-check": ":material/check_circle:", "info": ":material/info:"}
 
 
 def material(name: str) -> str | None:

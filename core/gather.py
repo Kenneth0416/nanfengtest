@@ -15,6 +15,7 @@ from datetime import date, datetime, timezone
 from html.parser import HTMLParser
 
 from . import taxonomy as tx
+from . import lifecycle
 from .models import NewsItem, RawItem
 
 MERGE_AT = 0.55          # match score at which a share is treated as the same story
@@ -142,17 +143,35 @@ def match_score(a: NewsItem, b: NewsItem) -> tuple[float, list[str]]:
     return round(score, 2), why
 
 
-def find_matches(store, item: NewsItem, limit: int = 3) -> list[dict]:
-    """Stored stories most like this one, best first."""
+def find_matches(store, item: NewsItem, limit: int = 3, config: dict | None = None, today: date | None = None) -> list[dict]:
+    """Stored stories most like this one, best first. Only stories published inside the match window (90 days
+    by default) are compared, the same category first, so a library of years of news stays quick."""
+    window = (config or {}).get("lifecycle", {}).get("match_window_days", 90)
+    today = today or date.today()
+    try:  # the same story breaks around the same time: the window sits around the item's own date
+        anchor = date.fromisoformat((item.published or "")[:10])
+    except ValueError:
+        anchor = today
+    since = date.fromordinal(anchor.toordinal() - window).isoformat()
+    until = date.fromordinal(anchor.toordinal() + window).isoformat()
     scored = []
-    for n in store.news():
-        if n.id == item.id:
-            continue
-        score, why = match_score(item, n)
-        if score >= 0.3:
-            scored.append({"id": n.id, "title": n.title, "source": n.source, "published": n.published,
-                           "score": score, "why": why})
-    return sorted(scored, key=lambda m: -m["score"])[:limit]
+
+    def scan(rows, same_cat):
+        for n in rows:
+            if n.id == item.id or n.published > until:
+                continue
+            score, why = match_score(item, n)
+            if score >= 0.3:
+                scored.append({"id": n.id, "title": n.title, "source": n.source, "published": n.published,
+                               "score": score, "why": why, "_cat": same_cat})
+
+    # the same story is almost always classified the same way: compare the same category first, and only when
+    # nothing there looks like a match go through the other categories in the window
+    scan(store.news(since=since, category=item.category), True)
+    if not scored or scored[0]["score"] < 0.5:
+        scan([n for n in store.news(since=since) if n.category != item.category], False)
+    scored.sort(key=lambda m: (-m["_cat"], -m["score"]))
+    return [{k: v for k, v in m.items() if k != "_cat"} for m in scored[:limit]]
 
 
 # -- save --------------------------------------------------------------------------------------
@@ -167,18 +186,32 @@ def save(store, item: NewsItem, share: dict | None = None, merge_into: str | Non
         if share and share.get("url") and not old.url:
             old.url = share["url"]
         old.importance = max(old.importance, item.importance)
+        old.state = lifecycle.state_for(old, date.today())  # a new report brings a cooling story back
         store.add_news(old)
         return old, True
     item.discovered = item.discovered or _now()
     if share:
         item.shared_by = [share]
+    item.state = lifecycle.state_for(item, date.today())  # an old story arrives already cooling or archived
     store.add_news(item)
     return item, False
 
 
 # -- how hot is it -----------------------------------------------------------------------------
-def hotness(store, config: dict, item: NewsItem, today: date | None = None) -> tuple[int, list[str]]:
-    """0-100 with the reasons, so 'hot' is never a black box."""
+def biggest_deals(store, today: date) -> dict:
+    """The two largest lettings and sales of the last 12 months, one query for a whole re-scoring run."""
+    since = date.fromordinal(today.toordinal() - 365).isoformat()
+    out = {}
+    for cat, attr in (("leasing_deal", "size_sqft"), ("investment_deal", "value_gbp_m")):
+        vals = sorted((getattr(n, attr) or 0 for n in store.news(since=since, category=cat)
+                       if n.published <= today.isoformat()), reverse=True)
+        out[cat] = vals[:2]
+    return out
+
+
+def hotness(store, config: dict, item: NewsItem, today: date | None = None, peers: dict | None = None) -> tuple[int, list[str]]:
+    """0-100 with the reasons, so 'hot' is never a black box. `peers` (from biggest_deals) saves the query
+    per item when a whole library is re-scored."""
     today = today or date.today()
     score, why = item.importance * 10, []
     if item.importance >= 4:
@@ -208,12 +241,11 @@ def hotness(store, config: dict, item: NewsItem, today: date | None = None) -> t
     # Biggest of its kind in the last 12 months, among deals the library holds.
     one_deal = re.search(r"\b(buys|bought|acquir|sells|sold|pays|takes|signs|pre-lets|commits|let)", item.title, re.I)
     if item.category in ("leasing_deal", "investment_deal") and one_deal and age <= 365:
-        since = date.fromordinal(today.toordinal() - 365).isoformat()
-        peers = [n for n in store.news() if n.category == item.category and n.id != item.id
-                 and since <= n.published <= today.isoformat()]
         attr, label = (("size_sqft", "letting") if item.category == "leasing_deal" else ("value_gbp_m", "deal"))
-        v = getattr(item, attr)
-        if v and peers and v > max((getattr(n, attr) or 0) for n in peers):
+        v = getattr(item, attr) or 0
+        top = (peers or biggest_deals(store, today)).get(item.category, [])
+        others = [t for t in top if t != v] or top[1:]  # the largest among the other deals
+        if v and top and (len(top) > 1 or top[0] != v) and v > max(others, default=0):
             score += 15
             why.append(f"largest {label} in the last 12 months")
     focus_markets = {m for r in store.q("SELECT data FROM user_focus") for m in _focus_markets(r["data"])}
@@ -244,12 +276,16 @@ def score(store, config: dict, news_id: str) -> NewsItem | None:
     return item
 
 
-def rescore_all(store, config: dict) -> None:
-    """Hotness decays with age and depends on the other stories, so refresh it after each collection."""
-    for n in store.news():
-        n.hot, reasons = hotness(store, config, n)
+def rescore_all(store, config: dict, today: date | None = None) -> None:
+    """Hotness decays with age and depends on the other stories, so refresh it after each collection: only the
+    live stories (archived ones keep their last score), the biggest deals looked up once, one commit."""
+    today = today or date.today()
+    peers = biggest_deals(store, today)
+    for n in store.news(states=lifecycle.LIVE):
+        n.hot, reasons = hotness(store, config, n, today, peers)
         n.why_hot = "; ".join(reasons)
-        store.add_news(n)
+        store.add_news(n, commit=False)
+    store.db.commit()
 
 
 # -- the whole round for one share -------------------------------------------------------------
@@ -280,7 +316,7 @@ def process_share(ctx, text: str = "", url: str = "", how: str = "Other", user: 
     source = page.get("site") or (re.sub(r"^www\.", "", url.split("/")[2]) if url.count("/") >= 2 else f"Tip ({how})")
     item = classify(ctx, title, body or title, url, source, page.get("published", ""))
     share = {"who": user, "how": how, "when": _now(), "note": text[:300], "url": url}
-    matches = find_matches(ctx.store, item)
+    matches = find_matches(ctx.store, item, config=ctx.config)
     same = matches[0] if matches and matches[0]["score"] >= merge_at(ctx.config) else None
     saved, merged = save(ctx.store, item, share, same["id"] if same else None)
     saved = score(ctx.store, ctx.config, saved.id)

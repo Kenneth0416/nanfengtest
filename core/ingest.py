@@ -56,7 +56,7 @@ def add_news(ctx: Context, item) -> None:
     from . import gather
     if ctx.store.news_item(item.id):
         return
-    matches = gather.find_matches(ctx.store, item, limit=1)
+    matches = gather.find_matches(ctx.store, item, limit=1, config=ctx.config)
     same = matches[0]["id"] if matches and matches[0]["score"] >= gather.merge_at(ctx.config) else None
     gather.save(ctx.store, item, merge_into=same)
 
@@ -74,6 +74,6 @@ def refresh(ctx: Context, connectors: list) -> list[dict]:
             rep = {"connector": conn.id, "counts": {}, "warnings": [], "error": str(e)}
             ctx.store.set_status(conn.id, "unavailable", str(e)[:200])
         reports.append(rep)
-    from .gather import rescore_all
-    rescore_all(ctx.store, ctx.config)
+    from .lifecycle import housekeep
+    housekeep(ctx.store, ctx.config)  # states advance, live stories re-scored, today's digest built
     return reports

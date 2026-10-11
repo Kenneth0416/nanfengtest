@@ -50,6 +50,9 @@ BRAND = HERE / "assets" / "brand"  # the app logo (direction A, skyline) and the
 st.set_page_config(page_title="London Office Market Agent", page_icon=str(BRAND / "favicon-32.png"), layout="wide")
 KIND_LABEL = {"metric_move": "Market data", "vs_long_term": "vs long-term average", "news": "News",
               "pipeline": "New supply", "macro": "Macro", "data_quality": "Data check", "alert": "Your alert"}
+KIND_FOLD = {"metric_move": "Market data", "vs_long_term": "vs long-term average", "pipeline": "New supply",
+             "macro": "Macro", "data_quality": "Figures to check", "flight_to_quality": "Grade A vs the rest",
+             "demand": "Demand and liquidity", "alert": "Alerts"}
 NOT_PEOPLE = {"auto", "cli", "scheduler", "guest", "agent", "team", "poc seed", "auto-update"}
 
 # ---------------------------------------------------------------- look (from the prototype)
@@ -919,6 +922,8 @@ def signal_chips(s) -> str:
         out.append(chip("Check source", "warn"))
     if s.hot >= 60:
         out.append(chip("Important", "warn"))
+    if getattr(s, "_new", False):
+        out.append(chip("New", "ok"))
     if s.shared_by:
         out.append(chip("Shared by " + ", ".join(x["who"] for x in s.shared_by[:2]), "ok"))
     return "".join(out)
@@ -938,7 +943,7 @@ def numbers_line(s) -> str:
     return f'<div class="loa-nums">{"".join(parts)}</div>'
 
 
-def signal_card(s, i, lens="team"):
+def signal_card(s, i, lens="team", new: bool = False):
     in_brief = {b["id"]: b["added_by"] for b in app.store.brief_items()}
     glyph = ic({"up": "arrow-up", "down": "arrow-down"}.get(s.direction, "arrow-right"), 14)
     cls = "alert" if s.kind == "alert" else {"positive": "pos", "negative": "neg"}.get(s.tone, "neu")
@@ -951,6 +956,7 @@ def signal_card(s, i, lens="team"):
         why += f'<div class="loa-muted">{esc(s.why_hot)}</div>'
     if s.flag:
         why += f'<div class="loa-muted">{ic("triangle-alert", 13, "flag")}{esc(s.flag)}. Anyone can settle it on Sources.</div>'
+    s._new = new  # arrived since this person last looked: a 'New' chip
     with st.container(border=True):
         st.html(f"""
 <div style="display:flex;align-items:flex-start;gap:4px">
@@ -1191,6 +1197,11 @@ def monitor_page():
     freshness_line()
     hidden = app.store.hidden_signals(user)
     team_sigs = [s for s in signals.for_role("team") if s.id not in hidden]
+    dg = signals.digest(app.config.get("digest", {}).get("team_size", 5), user=user, hidden=hidden)
+    last_seen = dg["last_seen"]
+    if dg["new_since"]:
+        st.html(f'<div class="loa-fresh" style="margin-top:-8px">{ic("sparkles", 14, "accent")}<b>{dg["new_since"]} new</b> '
+                f'since you last looked ({esc(lib.when(last_seen))})</div>')
     main, side = st.columns([2.1, 1], gap="medium")
     with main:
         summary_card(team_sigs)
@@ -1204,24 +1215,35 @@ def monitor_page():
             view = st.segmented_control("Show", ["For you", "Whole team"], key="view", label_visibility="collapsed",
                                         format_func=lambda v: f"Whole team · {len(team_sigs)}" if v == "Whole team" else v)
         focus_row(mine, len(hidden))
+        rest = []
         if view == "For you" and mine:
-            sigs, lens = signals.for_focus(user, mine), mine.get("lens", "team")
+            sigs, lens = signals.diversify(signals.for_focus(user, mine)), mine.get("lens", "team")
         else:
             if view == "For you":
                 st.info("You haven't set up your view yet. Press 'Set up my focus' and describe your job in one "
                         "sentence. Meanwhile, here is the whole team's list.")
-            show_all = st.session_state.get("show_all_signals")
-            sigs, lens = (team_sigs if show_all else team_sigs[:8]), "team"
-            if len(team_sigs) > 8:
-                c = st.columns([3, 1.4], vertical_alignment="center")
-                c[0].caption(f"{'All' if show_all else 'Top 8 of'} {len(team_sigs)} signals, ranked by what changed most")
-                if c[1].button("Show top 8" if show_all else f"Show all {len(team_sigs)}", key="show_all", type="tertiary"):
-                    st.session_state["show_all_signals"] = not show_all
-                    st.rerun()
+            # the team view is today's pick: alerts and flagged figures always, then the best of the rest with
+            # one card per story and no more than two per measure or submarket; everything else folds below
+            sigs, rest, lens = dg["picked"], dg["rest"], "team"
+            st.caption(f"Worth a look today: {len(sigs)} of {len(team_sigs)} signals. One card per story, at most "
+                       f"two per measure or submarket; the rest fold below.")
         if not sigs:
             st.info("Nothing in your focus changed. Widen it by telling the Copilot, e.g. 'more vacancy'.")
         for i, s in enumerate(sigs):
-            signal_card(s, i, lens)
+            signal_card(s, i, lens, new=bool(last_seen and s.discovered and s.discovered > last_seen))
+        if rest:
+            folded = " · ".join(f"{k} {v}" for k, v in sorted(dg["folded"].items(), key=lambda kv: -kv[1]))
+            with st.expander(f"{len(rest)} more: {folded}", icon=material("chevron-down")):
+                by_cat: dict[str, list] = {}
+                for s in rest:
+                    label = tx.CATEGORY_LABELS.get(s.category, s.category) if s.kind == "news" else \
+                        KIND_FOLD.get(s.kind, s.kind)
+                    by_cat.setdefault(label, []).append(s)
+                for label, group in sorted(by_cat.items(), key=lambda kv: -len(kv[1])):
+                    st.html(kicker(f"{label} · {len(group)}"))
+                    for i, s in enumerate(group):
+                        signal_card(s, f"r{i}", lens, new=bool(last_seen and s.discovered and s.discovered > last_seen))
+        app.store.mark_seen(user, datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"))
     with side:
         share_panel()
         watching_panel()

@@ -8,7 +8,7 @@ the three jobs the brief names: stay ahead of the market, support decisions, and
 
 | Job | Where | What the team gets |
 |---|---|---|
-| **Monitor** (stay ahead, spot risks early) | Monitor | A freshness strip, the team summary and ranked "what changed" signal cards: numbers line (before → after · change), why it matters, source chips, Add to brief. Toggle **Whole team** or **For you**. Side panels: Share a link or tip (one box; the agent files it), Alerts (rules in your own words, parsed live; yours until you press Share with team), Team activity (only what colleagues chose to share). Hide for me hides a signal from your own views; Top 8 of N with Show all. |
+| **Monitor** (stay ahead, spot risks early) | Monitor | A freshness strip, the team summary and ranked "what changed" signal cards: numbers line (before → after · change), why it matters, source chips, Add to brief. Toggle **Whole team** or **For you**. The team view is the day's pick (alerts and flagged figures always, then the best of the rest, one card per story, at most two per measure or submarket), the rest folded by category below, and a New chip on what arrived since you last looked; news leaves Monitor when it stops being active (30 days, 60 for deals) but stays in the library. Side panels: Share a link or tip (one box; the agent files it), Alerts (rules in your own words, parsed live; yours until you press Share with team), Team activity (only what colleagues chose to share). Hide for me hides a signal from your own views. |
 | **Decide** (ask, compare, drill down) | Ask Copilot | Ask anything from any page: a floating button at the bottom right of every page (also Ctrl+K, or the / key) opens the side panel; Ask Copilot in the left navigation is the full page. It knows the page you are on, or the signal you asked from. The answer streams in as the model writes it, with a status line naming each tool as it starts; the thread follows the output while you are at the bottom and stays put when you scroll up to read (a "↓ Latest" button brings you back); the cursor returns to the box after each answer. No login: the first visit asks who you are (pick a team name or type one) and the browser remembers it in a cookie, so a refresh or a bookmark brings back the same person and their last conversation. Conversations are saved under your name and stay private: History (top right of the chat) lists them to resume, New chat starts a clean one with its own context. Each answer has a Share to team button; only a shared answer appears in Team activity, with your name and the time, and Unshare takes it out. The example questions appear only on a new chat; after an answer the Copilot offers its own follow-up questions as buttons. It answers in the language you ask in (English by default, Chinese for a Chinese question). The input box is pinned to the bottom of the page and of the side panel. Every number comes from a tool with its source. If you ask about a publisher the library has no figures from ("what does Savills say…") or an area it does not track (Shoreditch), it says so first and names the nearest covered submarket. |
 | **Report** (board and IC) | Team brief | Anyone can press Add to brief on a signal. The brief is written as a board summary or an IC paper section, with every figure footnoted to its source. Copy as Markdown, download it, or use the Slides panel (**Build slides**, then **Download .pptx**): a 3-6 slide editable PowerPoint on one of five house themes (navy-gold, editorial-cream, data-white, charcoal-amber, forest-cream) built by python-pptx from the library, with native charts, KPI tiles, so-what bands and signal cards. The storyline is not a fixed template: the Copilot reads this week's data and a ranked list of story candidates (alert lines crossed, biggest moves, gaps to the long-term average, new deals) and decides which 1-4 topics get a slide, which layout each gets and why; the why is written into the slide notes and shown under "Why these slides". Without a model a rule-picked plan from the same candidates is used and labelled as the fallback. The Copilot can also write the whole storyline on request ("make the brief into slides", "a client update deck on the forest theme"): it picks the theme and layouts and writes the titles, so-what lines and notes; any number in its text that is not in the data is refused, and a post-build check reports overflow, overlaps and leftover text so the model fixes and rebuilds. See [docs/brief-deck.md](docs/brief-deck.md). |
 | Shared data | Sources | One library for the whole team, three kinds of source, each shown as a coloured dot with a text label. Open data is collected automatically; uploaded reports come from anyone on the team; **internal data** is the company's own lettings, leases and valuations, recorded from a sentence to the Copilot, a photo (lease page, WhatsApp screenshot), a PDF or a spreadsheet, all through the same agent into one deal record. Pieces arrive separately and are merged by property and floor; drafts list their missing fields; the recorder confirms; each record is internal-only or quotable, and the brief lists "Our deals" apart from "Market deals" (the IC paper gets quotable records only). See [docs/internal-data.md](docs/internal-data.md). Cards for the gathering round, adding a source (the agent proposes how it will be collected after reading its terms), the information agent, and what needs a person. |
@@ -183,6 +183,7 @@ both jobs daily (systemd timer or cron):
 ```bash
 python main.py refresh    # open-data feeds
 python main.py gather     # Pi information agent: colleagues' links and tips, open data, new report titles
+python main.py housekeep  # lifecycle: advance states, re-score live stories, build the day's digest
 ```
 
 The Python skills are the tools: Pi Durable calls them through a local HTTP bridge on 127.0.0.1.
@@ -259,6 +260,23 @@ fetched at runtime. `icon(name, size)` paints an icon in the text colour through
 Material Symbols, so those use the closest Material name via `material(name)`; both are 1.75-stroke line
 icons of the same size, so the two sets read as one. The deck themes and the brief use the same words
 (Open data, Uploaded, Internal, Flagged) in place of the old coloured circles.
+
+## Information lifecycle
+
+Nothing is deleted; information changes state as it ages, so the Copilot and search can still find an old story
+while Monitor shows only what is live. States: **new → active → cooling → archived**, plus **expired** for a
+colleague's tip that never found a published source and **superseded** for an agency report replaced by the next
+edition. The periods live in `config.yaml` under `lifecycle:` (news: fresh 2 days, active 30, archived after 180,
+half-life 7 days; deal news 7 / 60 / 180 / 14; tips 2 / 14 / 180 / 5 with 14 days to find a source; data series
+never decay, the latest period decides). Ranking uses the half-life, so a story from three days ago outranks the
+same story from twenty days ago. `python main.py housekeep` is the daily tidy-up (also run at the end of every
+`refresh`): it advances states, re-scores only the live stories (the biggest deals looked up once, one commit),
+builds the day's digest and leaves one line in team activity when anything moved; running it twice changes
+nothing the second time. A new story is compared with stories published within 120 days of its own date, the
+same category first, so merging stays quick with years of news. Monitor's team view is the digest: alerts,
+flagged figures and today's data always, then the best of the rest with one card per story and at most two per
+measure or submarket; everything else folds under one line by category, and a "New" chip marks what arrived since
+you last looked. Design: `research/information-lifecycle.md`.
 
 ## What is real and what is demo
 

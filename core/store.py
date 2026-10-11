@@ -22,6 +22,8 @@ CREATE TABLE IF NOT EXISTS pipeline (scheme TEXT PRIMARY KEY, submarket TEXT, si
 CREATE TABLE IF NOT EXISTS macro (date TEXT, indicator TEXT, value REAL, unit TEXT, source_id TEXT,
     note TEXT, UNIQUE(date, indicator));
 CREATE TABLE IF NOT EXISTS news (id TEXT PRIMARY KEY, data TEXT, published TEXT);
+CREATE TABLE IF NOT EXISTS digest (day TEXT PRIMARY KEY, data TEXT, ts TEXT DEFAULT CURRENT_TIMESTAMP);
+CREATE TABLE IF NOT EXISTS user_seen (user TEXT PRIMARY KEY, last_seen TEXT);
 CREATE TABLE IF NOT EXISTS watch_rules (id INTEGER PRIMARY KEY AUTOINCREMENT, role TEXT, market TEXT,
     metric TEXT, op TEXT, value REAL, label TEXT);
 CREATE TABLE IF NOT EXISTS feedback (signal_id TEXT, role TEXT, vote INTEGER, ts TEXT DEFAULT CURRENT_TIMESTAMP);
@@ -63,6 +65,22 @@ MIGRATIONS = [
     ("observations", "resolved_by TEXT DEFAULT ''"),
     ("team_log", "ref TEXT DEFAULT ''"),               # a shared Copilot answer: the chat_messages id it came from
     ("team_log", "note TEXT DEFAULT ''"),              # the sharer's one-line reason ("IC needs this")
+    # information lifecycle: real columns on news so Monitor's queries filter by state without parsing JSON
+    ("news", "state TEXT DEFAULT 'new'"),
+    ("news", "valid_until TEXT"),
+    ("news", "state_changed TEXT"),
+    ("news", "category TEXT"),
+    ("news", "importance INTEGER"),
+    ("news", "hot INTEGER"),
+    ("news", "markets TEXT"),
+    ("news", "discovered TEXT"),
+    ("news", "story_id TEXT"),
+    ("observations", "state TEXT DEFAULT 'active'"),
+]
+INDEXES = [
+    "CREATE INDEX IF NOT EXISTS news_state_published ON news (state, published)",
+    "CREATE INDEX IF NOT EXISTS news_category_published ON news (category, published)",
+    "CREATE INDEX IF NOT EXISTS news_story ON news (story_id)",
 ]
 SOURCE_COLS = ("source_id", "publisher", "title", "period", "url", "definition_note", "channel", "licence",
                "uploaded_by", "uploaded_at", "file_hash")
@@ -91,6 +109,20 @@ class Store:
         self.db.execute("DELETE FROM team_log WHERE kind = 'setup' OR (kind = 'brief' AND (text LIKE 'built the team brief%' "
                         "OR text LIKE 'rewrote the team brief%'))")
         self.db.commit()
+        for sql in INDEXES:
+            self.db.execute(sql)
+        self._backfill_news()
+        self.db.commit()
+
+    def _backfill_news(self):
+        """Older databases hold news as JSON only: fill the real columns once from it."""
+        rows = self.q("SELECT id, data FROM news WHERE category IS NULL OR story_id IS NULL")
+        for r in rows:
+            d = json.loads(r["data"])
+            self.db.execute("UPDATE news SET category=?, importance=?, hot=?, markets=?, discovered=?, story_id=?, "
+                            "state=COALESCE(state, 'new') WHERE id=?",
+                            (d.get("category", "other"), d.get("importance", 1), d.get("hot", 0),
+                             json.dumps(d.get("markets", [])), d.get("discovered", ""), d.get("story_id") or r["id"], r["id"]))
 
     # -- writes -------------------------------------------------------------
     def add_source(self, row: dict):
@@ -139,9 +171,43 @@ class Store:
         self.db.execute("INSERT OR REPLACE INTO macro VALUES (:date,:indicator,:value,:unit,:source_id,:note)", row)
         self.db.commit()
 
-    def add_news(self, item: NewsItem):
-        self.db.execute("INSERT OR REPLACE INTO news VALUES (?,?,?)",
-                        (item.id, json.dumps(asdict(item)), item.published))
+    def add_news(self, item: NewsItem, commit: bool = True):
+        """Insert or update one story: the JSON and the real columns Monitor filters on. A batch (a collection
+        round) passes commit=False and commits once at the end."""
+        item.story_id = item.story_id or item.id
+        self.db.execute("INSERT OR REPLACE INTO news (id, data, published, state, valid_until, state_changed, category, "
+                        "importance, hot, markets, discovered, story_id) VALUES (?,?,?,?,"
+                        "(SELECT valid_until FROM news WHERE id=?),(SELECT state_changed FROM news WHERE id=?),?,?,?,?,?,?)",
+                        (item.id, json.dumps(asdict(item)), item.published, item.state, item.id, item.id, item.category,
+                         item.importance, item.hot, json.dumps(item.markets), item.discovered, item.story_id))
+        if commit:
+            self.db.commit()
+
+    def set_news_state(self, news_id: str, state: str, changed: str, valid_until: str = "", commit: bool = True):
+        """Lifecycle: the state column and the copy inside the JSON move together."""
+        self.db.execute("UPDATE news SET state=?, state_changed=?, valid_until=?, "
+                        "data=json_set(data, '$.state', ?) WHERE id=?", (state, changed, valid_until, state, news_id))
+        if commit:
+            self.db.commit()
+
+    def news_rows(self) -> list[tuple[NewsItem, dict]]:
+        """Every story with its lifecycle columns, for housekeeping."""
+        return [(NewsItem(**json.loads(r["data"])), r) for r in self.q("SELECT * FROM news ORDER BY published DESC")]
+
+    def save_digest(self, day: str, data: dict):
+        self.db.execute("INSERT OR REPLACE INTO digest (day, data) VALUES (?,?)", (day, json.dumps(data)))
+        self.db.commit()
+
+    def digest(self, day: str) -> dict | None:
+        r = self.q("SELECT data FROM digest WHERE day=?", (day,))
+        return json.loads(r[0]["data"]) if r else None
+
+    def last_seen(self, user: str) -> str:
+        r = self.q("SELECT last_seen FROM user_seen WHERE user=?", (user,))
+        return r[0]["last_seen"] if r else ""
+
+    def mark_seen(self, user: str, when: str):
+        self.db.execute("INSERT OR REPLACE INTO user_seen (user, last_seen) VALUES (?,?)", (user, when))
         self.db.commit()
 
     def set_status(self, connector: str, status: str, detail: str = ""):
@@ -299,8 +365,21 @@ class Store:
             sql += " AND metric=?"; params.append(metric)
         return self.q(sql + " ORDER BY period", params)
 
-    def news(self) -> list[NewsItem]:
-        return [NewsItem(**json.loads(r["data"])) for r in self.q("SELECT data FROM news ORDER BY published DESC")]
+    def news(self, states: tuple | list | None = None, since: str | None = None, category: str | None = None) -> list[NewsItem]:
+        """Stories newest first. With no filter everything comes back (archived and expired included, so the
+        Copilot and search still find old stories); Monitor asks for states=('new', 'active')."""
+        where, params = [], []
+        if states:
+            where.append(f"state IN ({','.join('?' * len(states))})")
+            params += list(states)
+        if since:
+            where.append("published >= ?")
+            params.append(since)
+        if category:
+            where.append("category = ?")
+            params.append(category)
+        sql = "SELECT data FROM news" + (" WHERE " + " AND ".join(where) if where else "") + " ORDER BY published DESC"
+        return [NewsItem(**json.loads(r["data"])) for r in self.q(sql, params)]
 
     def watch_rules(self, role=None) -> list[dict]:
         if role:

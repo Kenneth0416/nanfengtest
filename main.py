@@ -21,7 +21,8 @@ from core.engine import AgentUnavailable, Engine
 
 def main(argv=None):
     p = argparse.ArgumentParser(description="London Office Market Agent")
-    p.add_argument("command", choices=["refresh", "gather", "process", "chat", "ask", "brief", "signals", "ingest", "classify"])
+    p.add_argument("command", choices=["refresh", "gather", "process", "chat", "ask", "brief", "signals", "ingest", "classify",
+                                       "housekeep"])
     p.add_argument("text", nargs="?", help="question, file path or headline")
     p.add_argument("--user", default="cli", help="your name, for your own focus and team activity")
     p.add_argument("--ic", action="store_true", help="brief: IC paper section instead of board summary")
@@ -36,6 +37,13 @@ def main(argv=None):
     if a.command == "refresh":
         for r in app.refresh():
             print(f"{r['connector']:>16}: {r.get('error') or r['counts']}")
+        return
+    if a.command == "housekeep":  # the daily tidy-up: states advance, live stories re-scored, today's digest
+        from core.lifecycle import housekeep
+        res = housekeep(app.store, app.config)
+        moved = ", ".join(f"{n} {s}" for s, n in sorted(res["moved"].items())) or "nothing moved"
+        print(f"housekeep: {moved}; digest of {len(res['digest']['picked'])} picks, "
+              f"{sum(res['digest']['folded'].values())} folded")
         return
     app.ensure_data()
     try:

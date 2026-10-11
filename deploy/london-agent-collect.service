@@ -5,3 +5,4 @@ Type=oneshot
 WorkingDirectory=/opt/london-office-agent
 ExecStart=/usr/bin/docker compose exec -T app python main.py refresh
 ExecStart=/usr/bin/docker compose exec -T app python main.py gather
+ExecStart=/usr/bin/docker compose exec -T app python main.py housekeep

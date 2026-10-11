@@ -28,6 +28,9 @@ NEWS_WEIGHTS = {
     "macro_policy": _w(.4, .8, .4, 1.0), "development_pipeline": _w(.5, .7, 1.0, .5),
     "market_stats": _w(.6, .7, .6, .9), "other": _w(.3, .3, .3, .3),
 }
+KIND_LABELS = {"metric_move": "Market data", "vs_long_term": "vs long-term average", "pipeline": "New supply",
+               "macro": "Macro", "data_quality": "Figures to check", "flight_to_quality": "Grade A vs the rest",
+               "demand": "Demand and liquidity", "alert": "Alerts"}
 NEWS_WHY = {
     "leasing_deal": "Large lettings set rental evidence and show which occupiers are taking space.",
     "investment_deal": "Sets fresh pricing (yield) evidence for valuations and acquisitions.",
@@ -75,6 +78,7 @@ def _tone(metric: str, direction: str) -> str:
 class SignalEngine:
     def __init__(self, store, config: dict, today: date | None = None):
         self.store = store
+        self.config = config
         self.cfg = config.get("signals", {})
         self.today = today or date.today()
 
@@ -122,15 +126,18 @@ class SignalEngine:
         return keep if budget == "all" else keep[: int(budget)]
 
     def _recency(self, s: Signal) -> float:
-        """Older news and data rank lower: full weight inside 120 days, then fading."""
-        if s.kind not in ("news", "metric_move", "vs_long_term"):
+        """News fades with a half-life per kind (lifecycle rules); data series do not fade, because whether a
+        figure is the latest period already decides what shows."""
+        from . import lifecycle
+        if s.kind != "news":
             return 1.0
         try:
-            when = an.quarter_end(s.as_of) if "Q" in s.as_of else datetime.strptime(s.as_of[:10], "%Y-%m-%d").date()
+            when = datetime.strptime(s.as_of[:10], "%Y-%m-%d").date()
         except (ValueError, IndexError):
             return 1.0
-        age = (self.today - when).days
-        return 1.0 if age <= 120 else max(0.4, 1.0 - (age - 120) / 400)
+        kind = "tip" if s.title.startswith("Unverified tip: ") else \
+            ("deal_news" if s.category in lifecycle.DEAL_CATEGORIES else "news")
+        return lifecycle.freshness(kind, (self.today - when).days, lifecycle.rules(self.config, kind))
 
     # -- detectors ----------------------------------------------------------
     def metric_moves(self) -> list[Signal]:
@@ -251,16 +258,14 @@ class SignalEngine:
         return out[:5]
 
     def news(self) -> list[Signal]:
-        window = self.cfg.get("news_window_days", 180)
+        """Only live stories (lifecycle new or active) become Monitor signals; cooling and archived stories stay
+        in the library for the Copilot and search."""
+        from .lifecycle import LIVE
         min_imp = self.cfg.get("news_min_importance", 4)
         out = []
-        for n in self.store.news():
-            try:
-                age = (self.today - datetime.strptime(n.published, "%Y-%m-%d").date()).days
-            except ValueError:
-                age = 0
+        for n in self.store.news(states=LIVE):
             # A story a colleague shared always shows: someone on the team thought it mattered.
-            if (n.importance < min_imp and not n.shared_by and n.hot < 60) or age > window:
+            if n.importance < min_imp and not n.shared_by and n.hot < 60:
                 continue
             credit = ""
             if n.shared_by:
@@ -279,8 +284,57 @@ class SignalEngine:
                 severity=3 if n.importance >= 5 or n.hot >= 70 else 2, tone=n.sentiment, markets=n.markets,
                 themes=n.themes, category=n.category,
                 roles=NEWS_WEIGHTS.get(n.category, NEWS_WEIGHTS["other"]), as_of=n.published,
-                evidence=ev, hot=n.hot, why_hot=n.why_hot, shared_by=n.shared_by, discovered=n.discovered))
+                evidence=ev, hot=n.hot, why_hot=n.why_hot, shared_by=n.shared_by, discovered=n.discovered,
+                story=n.story_id or n.id))
         return out
+
+    # -- today's pick ---------------------------------------------------------
+    def diversify(self, sigs: list[Signal], per_measure: int = 2, per_market: int = 2) -> list[Signal]:
+        """One card per story, at most `per_measure` cards per metric and `per_market` per submarket, keeping
+        the ranking order; alerts and flagged figures are never dropped."""
+        seen_story, by_metric, by_market, out = set(), {}, {}, []
+        for s in sigs:
+            must = s.kind in ("alert", "data_quality") or bool(s.flag)
+            key = s.story or (s.id if s.kind == "news" else "")
+            if key and key in seen_story:
+                continue
+            market = s.markets[0] if s.markets else ""
+            if not must:
+                if s.metric and by_metric.get(s.metric, 0) >= per_measure:
+                    continue
+                if market and market != "London" and by_market.get(market, 0) >= per_market:
+                    continue
+            if key:
+                seen_story.add(key)
+            if s.metric:
+                by_metric[s.metric] = by_metric.get(s.metric, 0) + 1
+            if market:
+                by_market[market] = by_market.get(market, 0) + 1
+            out.append(s)
+        return out
+
+    def digest(self, limit: int = 5, user: str | None = None, hidden: set | None = None) -> dict:
+        """'Worth a look today': alerts, figures from a data period that arrived today and unresolved flags
+        always make it; the rest by score with one card per story and a diversity cap. Returns the picks, how
+        the rest fold by category, and how many items arrived since the person last looked."""
+        d = self.config.get("digest", {})
+        ranked = [s for s in self.for_role("team") if not hidden or s.id not in hidden]
+        today = self.today.isoformat()
+        fresh_period = self.store.q("SELECT 1 FROM sources WHERE (uploaded_at LIKE ? OR uploaded_at LIKE ?) LIMIT 1",
+                                    (today + "%", today.replace("-", "") + "%"))
+        latest = an.latest_period(self.store)
+        must = [s for s in ranked if s.kind == "alert" or s.flag or s.kind == "data_quality"
+                or (fresh_period and s.kind == "metric_move" and s.as_of == latest)]
+        rest = [s for s in ranked if s not in must]
+        picked = self.diversify(must + rest, d.get("per_measure_max", 2), d.get("per_market_max", 2))
+        picked, rest = picked[:limit], [s for s in ranked if s not in picked[:limit]]
+        folded: dict[str, int] = {}
+        for s in rest:
+            label = tx.CATEGORY_LABELS.get(s.category, s.category) if s.kind == "news" else KIND_LABELS.get(s.kind, s.kind)
+            folded[label] = folded.get(label, 0) + 1
+        last_seen = self.store.last_seen(user) if user else ""
+        new_since = sum(1 for s in ranked if s.discovered and last_seen and s.discovered > last_seen)
+        return {"picked": picked, "rest": rest, "folded": folded, "new_since": new_since, "last_seen": last_seen}
 
     def pipeline(self) -> list[Signal]:
         horizon = self.cfg.get("pipeline_horizon_quarters", 6)

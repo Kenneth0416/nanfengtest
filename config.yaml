@@ -95,9 +95,20 @@ skills:                     # agent skills (skills/<name>/SKILL.md + tools.py)
   - internal_data            # our own deals: one record from a sentence, a photo, a PDF or a spreadsheet
 
 signals:
-  news_window_days: 365
   news_min_importance: 4
   pipeline_horizon_quarters: 6
+
+# Information lifecycle (research/information-lifecycle.md): nothing is deleted, items change state with age.
+# new -> active -> cooling -> archived; a tip (a colleague's words with no published source) expires after
+# verify_days; data series never decay (the latest period decides); an agency report is superseded by the next.
+lifecycle:
+  news: {fresh_days: 2, active_days: 30, archive_days: 180, half_life_days: 7}
+  deal_news: {fresh_days: 7, active_days: 60, archive_days: 180, half_life_days: 14}
+  tip: {fresh_days: 2, active_days: 14, archive_days: 180, half_life_days: 5, verify_days: 14}
+  series: {decay: false}
+  agency_report: {decay: false, superseded: next_period}
+  match_window_days: 120      # a new story is compared with stories published within this many days of its own date
+digest: {team_size: 5, per_measure_max: 2, per_market_max: 2}   # Monitor's "worth a look today"
 
 # One shared workspace for the whole business team. Everyone sees the same Home, alerts, brief and
 # team activity. The focus below is the starting point; the team changes it by describing itself to

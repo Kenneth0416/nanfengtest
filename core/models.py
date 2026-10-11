@@ -57,6 +57,8 @@ class NewsItem:
     discovered: str = ""
     hot: int = 0
     why_hot: str = ""
+    story_id: str = ""           # the story this item belongs to (its own id, or the one it was merged into)
+    state: str = "new"           # lifecycle: new | active | cooling | archived | expired
 
 
 @dataclass
@@ -87,6 +89,7 @@ class Signal:
     why_hot: str = ""
     shared_by: list[dict] = field(default_factory=list)  # colleagues who shared it
     discovered: str = ""
+    story: str = ""                    # news: the story id, so a digest shows one card per story
     flag: str = ""                     # set while a colleague's flag on that figure is unresolved
     before: str = ""                   # the figure before the change, as shown on the card ("8.5%")
     after: str = ""                    # the figure now ("8.0%")
