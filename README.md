@@ -2,7 +2,7 @@
 
 [![Watch the 3-minute intro](docs/pitch/intro-video-thumbnail.jpg)](docs/pitch/intro-video.mp4)
 
-**3-minute intro video:** [watch or download (MP4, 1080p, 16 MB)](docs/pitch/intro-video.mp4) · [subtitles (SRT)](docs/pitch/intro-video.srt)
+**3-minute intro video:** [watch or download (MP4, 1080p, 15 MB)](docs/pitch/intro-video.mp4) · [subtitles (SRT)](docs/pitch/intro-video.srt)
 
 An AI agent for a commercial real estate team that watches the London office market (rents, vacancy, take-up,
 supply, investment, macro and news), answers questions with every number sourced, and writes the weekly brief.
