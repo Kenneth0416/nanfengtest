@@ -138,6 +138,11 @@ header[data-testid="stHeader"] { background:transparent; pointer-events:none; bo
 header[data-testid="stHeader"] * { pointer-events:auto; }
 [data-testid="stToolbarActions"], [data-testid="stMainMenu"], [data-testid="stDecoration"], [data-testid="stStatusWidget"]
   { display:none !important; }  /* stToolbar itself stays: it holds the sidebar-expand button */
+/* with the strip gone, content starts near the top instead of under a 6rem reservation */
+[data-testid="stMainBlockContainer"] { padding-top:1.5rem; }
+[data-testid="stSidebarUserContent"] { padding-top:0.5rem; }
+[data-testid="stSidebarHeader"] { padding:10px 16px 0 16px; height:auto; min-height:0; }  /* just the collapse button */
+@media (max-width:760px) { [data-testid="stMainBlockContainer"] { padding-top:3.5rem; } }  /* room for the expand button */
 body:has(.loa-cp-page) .loa-notice { margin:0 0 4px 0; }
 body:has(.loa-cp-page) [data-testid="stBottomBlockContainer"]::after, div[data-testid="stDialog"] .stElementContainer:has(> .stChatInput)::after
   { content:"Copilot can be wrong. Every number links to its source; check the ones marked \26A0.";
