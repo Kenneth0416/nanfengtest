@@ -286,6 +286,8 @@ div[data-testid="stDialog"]:has(.loa-deck-ed) .st-key-deck_thumbs img { border:1
 div[data-testid="stDialog"]:has(.loa-deck-ed) .st-key-deck_thumbs .stButton button { justify-content:flex-start; font-size:12px; min-height:28px; padding:2px 8px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 div[data-testid="stDialog"]:has(.loa-deck-ed) .st-key-deck_stage img { border:1px solid var(--line); border-radius:6px; box-shadow:0 6px 24px rgba(15,26,42,.12); }
 div[data-testid="stDialog"]:has(.loa-deck-ed) .st-key-deck_chat [data-testid="stChatMessage"] { padding:6px 0; }
+div[data-testid="stDialog"]:has(.loa-deck-ed) [class*="st-key-cp_empty_"] { min-height:0; }
+div[data-testid="stDialog"]:has(.loa-deck-ed) .loa-cp-hello { font-size:18px; }
 div[data-testid="stDialog"]:has(.loa-deck-ed) [class*="st-key-ed_th_"] { position:relative; padding:4px 4px 2px 22px; border-radius:6px; gap:2px; }
 div[data-testid="stDialog"]:has(.loa-deck-ed) [class*="st-key-ed_th_"][class*="_on"] { background:var(--accent-soft, #e8eef7); }
 div[data-testid="stDialog"]:has(.loa-deck-ed) [class*="st-key-ed_th_"][class*="_on"] img { outline:2px solid var(--accent); outline-offset:0; }
@@ -418,44 +420,49 @@ def chat_owner() -> str:
     return st.session_state.setdefault("guest_id", "guest-" + hashlib.sha1(str(id(st.session_state)).encode()).hexdigest()[:8])
 
 
-def open_chat(chat_id: str | None):
+# Every chat surface (the Copilot page, its side panel, the slide editor's column) keeps one saved conversation on
+# screen in a "slot": "" is the Copilot's, "_deck" the slide editor's. Same store, same owner, same turns shape.
+DECK_CHAT_PREFIX = "Slides · "
+
+
+def open_chat(chat_id: str | None, slot: str = ""):
     """Put one saved chat on screen (None: a new, empty one; its row is created with the first question)."""
-    st.session_state["chat_id"] = chat_id
+    st.session_state["chat_id" + slot] = chat_id
     turns = []
     for m in (app.store.chat_messages(chat_id) if chat_id else []):
         turn = {"role": m["role"], "content": m["content"], "id": m["id"]}
         if m["role"] == "assistant" and m["trace"]:
             turn["answer"] = Answer(m["content"], m["trace"], m["engine"])
         turns.append(turn)
-    st.session_state["chat_turns"] = turns
+    st.session_state["chat_turns" + slot] = turns
 
 
-def current_chat() -> tuple[str | None, list[dict]]:
+def current_chat(slot: str = "") -> tuple[str | None, list[dict]]:
     """(chat id, turns) of the conversation on screen. After a refresh, or when the name changes, the person's
     latest saved chat comes back, so nothing is lost by reloading the page."""
     owner = chat_owner()
-    if st.session_state.get("chat_owner") != owner:
-        st.session_state["chat_owner"] = owner
-        latest = app.store.chats(owner, limit=1)
-        open_chat(latest[0]["id"] if latest else None)
-    return st.session_state.get("chat_id"), st.session_state.setdefault("chat_turns", [])
+    if st.session_state.get("chat_owner" + slot) != owner:
+        st.session_state["chat_owner" + slot] = owner
+        latest = [c for c in app.store.chats(owner) if (c["title"] or "").startswith(DECK_CHAT_PREFIX) == bool(slot)][:1]
+        open_chat(latest[0]["id"] if latest else None, slot)
+    return st.session_state.get("chat_id" + slot), st.session_state.setdefault("chat_turns" + slot, [])
 
 
-def ensure_chat() -> str:
+def ensure_chat(slot: str = "", title: str = "") -> str:
     """The id of the chat on screen, creating its row for the first question. The id also names the Copilot's
     conversation in Pi, so each chat keeps its own context and a new chat starts clean."""
-    if not st.session_state.get("chat_id"):
-        st.session_state["chat_id"] = app.store.new_chat(chat_owner())
-    return st.session_state["chat_id"]
+    if not st.session_state.get("chat_id" + slot):
+        st.session_state["chat_id" + slot] = app.store.new_chat(chat_owner(), title)
+    return st.session_state["chat_id" + slot]
 
 
-def say(role: str, content: str, ans: Answer | None = None):
+def say(role: str, content: str, ans: Answer | None = None, slot: str = "", title: str = ""):
     """Add a turn to the conversation on screen and to the saved chat."""
-    chat_id = ensure_chat()
+    chat_id = ensure_chat(slot, title)
     turn = {"role": role, "content": content}
     if ans is not None:
         turn["answer"] = ans
-    st.session_state.setdefault("chat_turns", []).append(turn)
+    st.session_state.setdefault("chat_turns" + slot, []).append(turn)
     turn["id"] = app.store.add_chat_message(chat_id, role, content, ans.trace if ans else None, ans.engine if ans else "")
 
 
@@ -523,6 +530,7 @@ def copilot_fab():
 
 
 def page_header(title: str, subtitle: str, extra: tuple | None = None):
+    st.session_state["_in_dialog"] = False  # the page itself is running; a dialog sets it again when it opens
     copilot_fab()
     follow_output()  # the page-level keyboard shortcut ("/") and follow-scrolling need the script on every page
     st.html('<div class="loa-notice">Evaluation PoC: market figures are restated from public Knight Frank reports '
@@ -549,7 +557,7 @@ def chart(spec: dict | None):
     st.plotly_chart(fig, width="stretch")
 
 
-def show_answer(ans, text_done: bool = False):
+def show_answer(ans, text_done: bool = False, downloads: bool = True):
     """One answer: a quiet 'Worked through N steps' line (the tools, folded), the text, its charts and downloads,
     then the sources line. While the answer streams, the live status line plays the first part."""
     if not text_done:
@@ -560,7 +568,7 @@ def show_answer(ans, text_done: bool = False):
         st.markdown(split_follow_ups(ans.text)[0])
     for step in ans.trace:
         chart(step["result"].get("chart"))
-        if step["tool"] == "build_brief_pptx" and (p := (step["result"].get("data") or {}).get("path")) and Path(p).exists():
+        if downloads and step["tool"] == "build_brief_pptx" and (p := (step["result"].get("data") or {}).get("path")) and Path(p).exists():
             st.download_button("Download the slides (.pptx)", Path(p).read_bytes(), file_name=Path(p).name,
                                mime="application/vnd.openxmlformats-officedocument.presentationml.presentation",
                                key=f"dl{hash(p)}{id(step)}")
@@ -757,21 +765,29 @@ def copilot():
 
 
 def _rerun():
-    st.rerun(scope="fragment" if st.session_state.get("_in_dialog") else "app")
+    """A fragment rerun inside the side panel or the slide editor when the dialog is running as one, else the
+    whole page (a dialog's first run belongs to the page, and the editor reopens from its state)."""
+    if st.session_state.get("_in_dialog"):
+        try:
+            st.rerun(scope="fragment")
+        except Exception:  # noqa: BLE001  (not a fragment rerun yet)
+            pass
+    st.rerun()
 
 
 SETUP_PILL = "Set up my focus"
 
 
-def _pick(key: str):
-    """A pill was chosen (an example question, a follow-up): it becomes the next question, and the pill resets so
-    the same one can be chosen again later."""
+def _pick(key: str, target: str = "cp_ask"):
+    """A pill was chosen (an example question, a follow-up): it becomes the next question of the surface named
+    by `target` (cp_ask: the Copilot; deck_ask: the slide editor), and the pill resets so the same one can be
+    chosen again later."""
     v = st.session_state.get(key)
     st.session_state[key] = None
     if v == SETUP_PILL:
         st.session_state["copilot_ctx"] = {"kind": "setup"}
     elif v:
-        st.session_state["cp_ask"] = v
+        st.session_state[target] = v
 
 
 def top_bar(ctx, chat_id, sfx: str):
@@ -813,11 +829,33 @@ def empty_state(ctx, intro: str, suggestions: list[str], sfx: str):
     else:
         head = f"Hi {name}. What do you want to know about London offices?"
         sub = "I can see what's on your screen, and every number comes with its source."
+    opts = ([SETUP_PILL] if ctx["kind"] == "page" else []) + [q for q in suggestions if q != SETUP_PILL]
+    hello_state(head, sub, opts, f"cs_{sfx}_{ctx['kind']}", sfx)
+
+
+def hello_state(head: str, sub: str, suggestions: list[str], key: str, sfx: str, target: str = "cp_ask"):
+    """The empty state every chat surface shares: a greeting, one line of what it does, example questions as
+    pills (chosen ones become the next question)."""
     with st.container(key=f"cp_empty_{sfx}"):
         st.html(f'<div class="loa-cp-hello">{esc(head)}</div><div class="loa-cp-sub">{esc(sub)}</div>')
-        opts = ([SETUP_PILL] if ctx["kind"] == "page" else []) + [q for q in suggestions if q != SETUP_PILL]
-        key = f"cs_{sfx}_{ctx['kind']}"
-        st.pills("Suggestions", opts, key=key, label_visibility="collapsed", on_change=_pick, args=(key,))
+        st.pills("Suggestions", suggestions, key=key, label_visibility="collapsed", on_change=_pick, args=(key, target))
+
+
+def follow_up_pills(turns: list[dict], sfx: str, target: str = "cp_ask") -> str | None:
+    """Under the thread of any chat surface: 'Ask again' after a stopped answer, else the last answer's own
+    follow-up questions as pills. Returns a question chosen by Ask again."""
+    if not turns or turns[-1]["role"] != "assistant":
+        return None
+    if turns[-1]["content"].endswith("*Stopped.*") and len(turns) > 1:
+        if st.button("Ask again", icon=material("refresh-cw"), key=f"again_{sfx}{len(turns)}"):
+            return turns[-2]["content"]
+    elif "answer" in turns[-1]:
+        _, follow_ups = split_follow_ups(turns[-1]["answer"].text)
+        if follow_ups:
+            st.html('<div class="loa-fu">Follow up</div>')
+            key = f"fu_{sfx}_{len(turns)}"
+            st.pills("Follow up", follow_ups, key=key, label_visibility="collapsed", on_change=_pick, args=(key, target))
+    return None
 
 
 def copilot_body(full: bool = False, question: str | None = None, own_input: bool = True):
@@ -850,15 +888,8 @@ def copilot_body(full: bool = False, question: str | None = None, own_input: boo
         with sugg.container():
             if not turns:  # the examples belong to a new chat; afterwards only the last answer's own follow-ups show
                 empty_state(ctx, intro, suggestions, sfx)
-            elif turns[-1]["role"] == "assistant" and turns[-1]["content"].endswith("*Stopped.*") and len(turns) > 1:
-                if st.button("Ask again", icon=material("refresh-cw"), key=f"again{len(turns)}"):
-                    clicked = turns[-2]["content"]
-            elif turns[-1]["role"] == "assistant" and "answer" in turns[-1]:
-                _, follow_ups = split_follow_ups(turns[-1]["answer"].text)
-                if follow_ups:
-                    st.html('<div class="loa-fu">Follow up</div>')
-                    key = f"fu_{sfx}_{len(turns)}"
-                    st.pills("Follow up", follow_ups, key=key, label_visibility="collapsed", on_change=_pick, args=(key,))
+            else:
+                clicked = follow_up_pills(turns, sfx) or clicked
     question = question or clicked
     if clicked:
         sugg.empty()  # a question is on its way: the pills leave the screen, as a typed question would
@@ -917,20 +948,21 @@ def history_list(chat_id, sfx):
         st.caption(f"{when(c['updated'])} · {c['messages']} messages")
 
 
-def absorb_partial(chat_id, turns):
+def absorb_partial(chat_id, turns, slot: str = ""):
     """After the reader pressed Stop (or clicked elsewhere) while an answer was streaming: keep what was
     written, marked 'Stopped', in the chat it belonged to. Returns the turns on screen, reloaded if that chat."""
-    if partial := st.session_state.pop("partial", None):
+    if (partial := st.session_state.get("partial")) and partial.get("slot", "") == slot:
+        st.session_state.pop("partial")
         app.store.add_chat_message(partial["chat"], "user", partial["q"])
         app.store.add_chat_message(partial["chat"], "assistant", (partial["text"].rstrip() or "(nothing written yet)")
                                    + "\n\n*Stopped.*")
         if partial["chat"] == chat_id:
-            open_chat(chat_id)
-            return st.session_state["chat_turns"]
+            open_chat(chat_id, slot)
+            return st.session_state["chat_turns" + slot]
     return turns
 
 
-def action_row(turn, latest: bool, prev_question: str, sfx: str):
+def action_row(turn, latest: bool, prev_question: str, sfx: str, target: str = "cp_ask"):
     """Under an answer: Copy, thumbs up, thumbs down, Ask again, Share to team, as 32px icon buttons. The latest
     answer's row stays on screen; an older row appears when the pointer is over that answer. An answer stays
     private to the person who asked until they share it; 'Shared to team · Undo' takes it out again."""
@@ -952,7 +984,7 @@ def action_row(turn, latest: bool, prev_question: str, sfx: str):
             _rerun()
         if prev_question and st.button("", icon=material("refresh-cw"), key=f"re{sfx}{mid}", type="tertiary",
                                        help="Ask this question again"):
-            st.session_state["cp_ask"] = prev_question
+            st.session_state[target] = prev_question
             _rerun()
         if shared:
             st.html(f'<span class="loa-shared">Shared to team · {lib.when(shared["ts"])}</span>')
@@ -969,16 +1001,22 @@ def action_row(turn, latest: bool, prev_question: str, sfx: str):
                     _rerun()
 
 
-def copilot_thread(turns, ctx, question):
-    sfx = "d" if st.session_state.get("_in_dialog") else "p"
+def thread_view(turns, sfx: str, busy: bool = False, target: str = "cp_ask", downloads: bool = True):
+    """The saved turns of any chat surface: user bubbles, answers with their work line, charts, sources and the
+    action row (copy, thumbs, ask again, share). `busy`: a new question is being answered under it."""
     for i, turn in enumerate(turns):
         with st.chat_message(turn["role"]):
             if turn["role"] == "user" or "answer" not in turn:
                 st.markdown(turn["content"])
             else:
-                show_answer(turn["answer"])
+                show_answer(turn["answer"], downloads=downloads)
                 prev = turns[i - 1]["content"] if i and turns[i - 1]["role"] == "user" else ""
-                action_row(turn, latest=(i == len(turns) - 1 and not question), prev_question=prev, sfx=sfx)
+                action_row(turn, latest=(i == len(turns) - 1 and not busy), prev_question=prev, sfx=sfx, target=target)
+
+
+def copilot_thread(turns, ctx, question):
+    sfx = "d" if st.session_state.get("_in_dialog") else "p"
+    thread_view(turns, sfx, busy=bool(question))
     if question and ctx["kind"] == "setup":
         say("user", question)
         with st.spinner("Drafting your setup…"):
@@ -1045,7 +1083,7 @@ TOOL_WORDS = {"get_signals": "reading this week's signals", "get_metric_trend": 
               "record_deal": "recording the deal", "list_our_deals": "listing our deals", "search_news": "searching the news"}
 
 
-def stream_answer(asked: str, chat_id: str | None = None, question: str = ""):
+def stream_answer(asked: str, chat_id: str | None = None, question: str = "", stream=None, slot: str = ""):
     """Ask the Copilot (continuing the chat `chat_id`) and show the answer as it is written. A Stop button sits
     under the status line while it writes: pressing it keeps what has arrived (marked 'Stopped') and offers
     'Ask again'. A status line names each tool as it starts; the
@@ -1061,12 +1099,12 @@ def stream_answer(asked: str, chat_id: str | None = None, question: str = ""):
                     st.code(e.detail, language=None)
         return None
     status = st.status("Reading market data…", expanded=False)
-    stream = engine.ask_streaming(asked, user, chat_id)
+    stream = stream or engine.ask_streaming(asked, user, chat_id)
     tools = []
     stop = st.empty()
     stop.button("", icon=material("square"), key=f"stop_{chat_id}", type="tertiary",
                 help="Stop: keep what has been written so far")
-    st.session_state["partial"] = {"q": question or asked, "chat": chat_id, "text": ""}
+    st.session_state["partial"] = {"q": question or asked, "chat": chat_id, "text": "", "slot": slot}
     shown = {"text": ""}
 
     held_box = {"text": "", "line_start": True}  # the tail is held back so the closing 'Follow up:' line never shows
@@ -1592,23 +1630,21 @@ class EditorUI:
     slots (planned first, then each rendered page), the stage, and the Copilot's words in the chat column.
     Outside the editor the plain st.status is all there is."""
 
-    def __init__(self, head_ph=None, thumbs_ph=None, stage_ph=None, words_ph=None, status=None):
-        self.head_ph, self.thumbs_ph, self.stage_ph, self.words_ph = head_ph, thumbs_ph, stage_ph, words_ph
-        self.status = status or st.status("Planning the slides…", expanded=False)
+    def __init__(self, head_ph=None, thumbs_ph=None, stage_ph=None):
+        self.head_ph, self.thumbs_ph, self.stage_ph = head_ph, thumbs_ph, stage_ph
+        self._status = None
         self.slots = []
+
+    @property
+    def status(self):
+        if self._status is None:  # made where the first message lands, so it sits under the streamed answer
+            self._status = st.status("Laying out the slides…", expanded=False)
+        return self._status
 
     def say(self, label):
         self.status.update(label=label)
         if self.head_ph is not None:
             self.head_ph.html(f'<div class="loa-muted loa-ed-status">{ic("loader-circle", 13, "spin")}{esc(label)}</div>')
-
-    def tool(self, name):
-        self.say(f"Working: {TOOL_WORDS.get(name, name.replace('_', ' '))}…")
-        self.status.write(f"→ {name}")
-
-    def words(self, text):
-        if self.words_ph is not None:
-            self.words_ph.markdown(text)
 
     def plan(self, titles, layouts):
         """The storyline is known: every slide gets a hatched 'Planned' frame before it is laid out."""
@@ -1660,38 +1696,32 @@ def paint_pages(pptx, folder, built, ui: EditorUI, on_page=None) -> dict:
     return {"pdf": pdf, "pages": pages, "why": why or ("" if pages else "page images need poppler (pdftoppm)")}
 
 
-def build_deck_now(fmt, theme, ui: EditorUI | None = None):
+def build_deck_now(fmt, theme, ui: EditorUI | None = None, chat_id: str | None = None):
     """The Copilot plans the deck from this week's data; without it the rule planner picks from the same stories.
     The .pptx, its PDF and one image per slide are kept under data/exports/decks/<fingerprint>/ and remembered
-    against the data fingerprint, so the same data never builds twice. In the slide editor `ui` shows the
-    Copilot's reasoning and each slide as it is laid out. Returns (how, note)."""
+    against the data fingerprint, so the same data never builds twice. In the slide editor `ui` shows each slide
+    as it is laid out, and the Copilot's planning streams like any answer (status line, Stop) into the chat
+    column. Returns (how, note, answer)."""
     ui = ui or EditorUI()
-    built, how, note, text = None, "", "", ""
+    built, how, note, ans = None, "", "", None
     if engine.ready:
         ui.say("The Copilot is reading this week's data and planning the slides…")
         try:
-            stream = engine.build_deck_streaming(fmt, theme, user, f"deck-{deck_fingerprint(fmt, theme)}")
-            for e in stream.events():
-                if e["event"] == "tool":
-                    ui.tool(e["name"])
-                elif e["event"] == "delta":
-                    text += e["text"]
-                    ui.words(text)
-            if stream.error:
-                raise stream.error
-            built, how, note = engine.built_deck(stream.answer), "copilot", stream.answer.text
+            ans = stream_answer(engine.deck_ask(fmt, theme), chat_id, "Build the slides",
+                                stream=engine.build_deck_streaming(fmt, theme, user, chat_id), slot="_deck")
+            if ans is not None:
+                built, how, note = engine.built_deck(ans), "copilot", ans.text
         except AgentUnavailable as e:
             note = str(e)
-        except Exception as e:  # noqa: BLE001  (the rule planner still gives a deck)
-            note = f"The Copilot could not finish ({str(e)[-160:]})."
     if not built:  # fallback: the rule-based planner, still this week's stories, no model
         ui.say("Picking the slides by rules from this week's data…")
         out = app.call("build_brief_pptx", {"format": fmt, "theme": theme}, user)
         built, how = out["data"] if out["data"].get("path") else None, "rules"
+        ans = ans or Answer(out["summary"], [{"tool": "build_brief_pptx", "args": {"format": fmt, "theme": theme}, "result": out}], "rules")
         if not built:
             ui.done("Not built", "error")
             st.warning(out["summary"])
-            return "", ""
+            return "", "", None
     pptx = deck_folder(fmt, built)
     store_deck(fmt, theme, built, how, note, {"pdf": "", "pages": [], "why": "rendering"})  # a Stop keeps what is built
     shown = paint_pages(pptx, pptx.parent, built, ui, lambda sh: store_deck(fmt, theme, built, how, note, sh))
@@ -1700,23 +1730,31 @@ def build_deck_now(fmt, theme, ui: EditorUI | None = None):
             "from this week's data")
     app.store.log("brief", user, f"built the team brief slides ({fx.BRIEF_FORMATS[fmt].lower()}, {built['theme']}, "
                                  f"{'storyline by the Copilot' if how == 'copilot' else 'rule-picked storyline'})")
-    return how, note
+    return how, note, ans
 
 
 # ---------------------------------------------------------------- slide editor (a floating window)
-EDIT_PILLS_ON = ["Make slide 2's title shorter", "Add a slide on investment", "Swap slides 2 and 3", "Remove the deals slide"]
+EDIT_PILLS_ON = ["Make slide 2's title shorter", "Add two more slides", "Swap slides 2 and 3", "Remove the deals slide"]
 EDIT_PILLS_OFF = ["Remove slide 3", "Add a slide on rents", "Move slide 3 to 2", "Theme forest"]
 THEME_SHORT = {"navy-gold": "Navy gold", "editorial-cream": "Editorial", "data-white": "Data white",
                "charcoal-amber": "Charcoal", "forest-cream": "Forest"}
 
 
+def deck_chat_title(fmt, theme) -> str:
+    return f"{DECK_CHAT_PREFIX}{fx.BRIEF_FORMATS[fmt]} · {THEME_SHORT.get(theme, theme)}"
+
+
 def open_deck_editor(fmt, theme, build=False, sel=1):
     """Marks the editor open; deck_panel shows it at the end of the run, and it stays open across reruns until
-    closed or dismissed."""
+    closed or dismissed. The conversation about this deck (the same saved chats as the Copilot, under the
+    person's name) comes back with it; Build again starts a new one."""
     old = st.session_state.get("deck_ed") or {}
-    same = old.get("fmt") == fmt and old.get("theme") == theme
-    st.session_state["deck_ed"] = {"fmt": fmt, "theme": theme, "build": build, "sel": sel, "pending": None,
-                                   "open": True, "chat": old.get("chat", []) if same and not build else []}
+    st.session_state["deck_ed"] = {"fmt": fmt, "theme": theme, "build": build, "sel": sel, "open": True}
+    if build or old.get("fmt") != fmt or old.get("theme") != theme or not st.session_state.get("chat_id_deck"):
+        title = deck_chat_title(fmt, theme)
+        chats = [] if build else [c for c in app.store.chats(chat_owner()) if c["title"] == title]
+        open_chat(chats[0]["id"] if chats else None, "_deck")
+        st.session_state["chat_owner_deck"] = chat_owner()
 
 
 def _close_editor():
@@ -1725,78 +1763,49 @@ def _close_editor():
 
 
 def _ed_rerun():
-    """Inside the editor: a fragment rerun when the dialog is running as one, else the whole page (the editor
-    reopens from its state)."""
-    try:
-        st.rerun(scope="fragment")
-    except Exception:  # noqa: BLE001  (the dialog's first run belongs to the page)
-        st.rerun()
-
-
-def _deck_pick(key):
-    v = st.session_state.get(key)
-    st.session_state[key] = None
-    if v:
-        ed = st.session_state["deck_ed"]
-        ed["pending"] = (v, False)
-        ed["chat"].append({"role": "user", "content": v})
+    _rerun()
 
 
 def _deck_theme_pick():
     ed = st.session_state["deck_ed"]
     v = st.session_state.get("ed_theme")
     if v and v != ed["theme"]:
-        ed.update(theme=v, sel=1, chat=[], pending=None, build=not cached_deck(ed["fmt"], v))
+        ed.update(theme=v, sel=1, build=not cached_deck(ed["fmt"], v))
+        open_chat(None, "_deck")
         st.session_state["deck_theme_want"] = (ed["fmt"], v)
 
 
-def edit_deck(ed, hit, instruction, via_rules, ui: EditorUI) -> str:
-    """One instruction from the editor's chat (or a stage button): the Copilot revises the spec and builds
-    again; plain commands and the buttons go through the rule editor, which also stands in when the Copilot is
-    offline. The pages are repainted one by one. Returns the reply."""
+def deck_history(sfx: str):
+    """The person's conversations about slides, newest first; one click brings a conversation back."""
+    chats = [c for c in app.store.chats(chat_owner()) if (c["title"] or "").startswith(DECK_CHAT_PREFIX)]
+    if not chats:
+        st.caption("No conversations about slides yet. They are kept under your name.")
+        return
+    current = st.session_state.get("chat_id_deck")
+    for c in chats:
+        if st.button((c["title"] or "Untitled")[:60], key=f"dhist_{sfx}_{c['id']}", width="stretch",
+                     help=f"{c['messages']} messages", type="primary" if c["id"] == current else "secondary"):
+            open_chat(c["id"], "_deck")
+            _ed_rerun()
+        st.caption(f"{when(c['updated'])} · {c['messages']} messages")
+
+
+def adopt_deck(ed, old_spec, built, instruction, ui: EditorUI, how, note, edits) -> str:
+    """A revised deck came back from the Copilot or the rule editor: refuse it if it dropped a slide nobody asked
+    to drop, else file it, repaint the pages one by one and describe what actually changed."""
     fmt, theme = ed["fmt"], ed["theme"]
-    d = hit["data"]
-    spec = d.get("spec")
-    if not spec:
-        return "This deck was built before the editor existed, so I have no spec to change. Press Build again first."
-    built, text, reply = None, "", ""
-    if engine.ready and not via_rules:
-        ui.say("The Copilot is revising the slides…")
-        try:
-            stream = engine.edit_deck_streaming(fmt, theme, spec, instruction, user, ed.get("conv"))
-            for e in stream.events():
-                if e["event"] == "tool":
-                    ui.tool(e["name"])
-                elif e["event"] == "delta":
-                    text += e["text"]
-                    ui.words(text)
-            if stream.error:
-                raise stream.error
-            built, reply = engine.built_deck(stream.answer), stream.answer.text
-            if not built:
-                ui.done("Nothing changed")
-                return reply or "The Copilot made no change."
-        except AgentUnavailable as e:
-            ui.done("Copilot unavailable", "error")
-            return str(e)
-        except Exception as e:  # noqa: BLE001
-            ui.done("Copilot failed", "error")
-            return f"The Copilot could not finish ({str(e)[-160:]})."
-    else:
-        stories = _bd.deck_data(app.ctx, fmt).get("stories") or []
-        new, reply = _de.apply(instruction, spec, stories)
-        if not new:
-            ui.done("No change")
-            return reply
-        ui.say("Building the slides again…")
-        out = app.call("build_brief_pptx", {"format": fmt, "theme": new["theme"], "spec": new}, user)
-        built = out["data"] if out["data"].get("path") else None
-        if not built:
-            ui.done("Not built", "error")
-            return f"Not built: {out['data'].get('error') or out['summary']}"
+    zh = _de.is_zh(instruction)
+    new_spec = built.get("spec") or {"theme": built["theme"], "slides": [{"title": x["title"], "layout": x["layout"]} for x in built["slides"]]}
+    old_titles = [x.get("title", "") for x in (old_spec or {}).get("slides", [])]
+    gone = [t for t in old_titles if t not in [x.get("title", "") for x in new_spec["slides"]]]
+    if gone and old_spec and not _de.asks_removal(instruction):
+        ui.done("Not applied", "error")
+        items = "; ".join(f"\"{t}\"" for t in gone)
+        return (f"這次修改會刪掉你沒有要求刪的頁：{items}，所以沒有套用，簡報維持原樣。要刪的話請明說（例如「刪第 3 頁」）。" if zh else
+                f"That revision would have dropped {items}, which you did not ask for, so it was not applied and the deck "
+                f"is unchanged. Say so explicitly (for example `remove slide 3`) if you do want it gone.")
     pptx = deck_folder(fmt, built)
-    edits = (d.get("edits") or []) + [instruction]
-    how, note = d.get("how", "rules"), d.get("note", "")
+    edits = edits + [instruction]
     shown = paint_pages(pptx, pptx.parent, built, ui, lambda sh: store_deck(fmt, theme, built, how, note, sh, edits))
     store_deck(fmt, theme, built, how, note, shown, edits)
     if built["theme"] != theme:  # the theme changed: the deck now lives under that theme
@@ -1806,15 +1815,55 @@ def edit_deck(ed, hit, instruction, via_rules, ui: EditorUI) -> str:
     ed["sel"] = min(ed.get("sel") or 1, len(built["slides"]))
     ui.done(f"{len(built['slides'])} slides · edited {len(edits)} time{'s' if len(edits) != 1 else ''} in the editor")
     app.store.log("brief", user, f"edited the team brief slides: {instruction[:80]}")
+    reply = _de.describe(old_spec, new_spec, instruction) if old_spec else \
+        (f"已重建，共 {len(built['slides'])} 頁。" if zh else f"Rebuilt: {len(built['slides'])} slides.")
     if built.get("problems"):
-        reply += "\n\nThe check flagged: " + "; ".join(built["problems"])
+        reply += ("\n\n檢查發現：" if zh else "\n\nThe check flagged: ") + "; ".join(built["problems"])
     return reply
+
+
+def edit_deck(ed, hit, instruction, via_rules, chat_id, ui: EditorUI) -> Answer | None:
+    """One instruction from the editor's chat (or a stage button): the Copilot revises the spec and builds
+    again, streamed like any Copilot answer (status line, Stop); plain commands and the buttons go through the
+    rule editor, which also stands in when the Copilot is offline. Returns the turn to save, or None after a
+    Stop."""
+    fmt, theme = ed["fmt"], ed["theme"]
+    d = hit["data"]
+    spec = d.get("spec")
+    zh = _de.is_zh(instruction)
+    if not spec:
+        return Answer("這份簡報是在編輯器出現之前建的，沒有可改的 spec，請先按 Build again。" if zh else
+                      "This deck was built before the editor existed, so I have no spec to change. Press Build again first.")
+    how, note, edits = d.get("how", "rules"), d.get("note", ""), list(d.get("edits") or [])
+    if engine.ready and not via_rules:
+        ans = stream_answer(engine.deck_edit_ask(fmt, theme, spec, instruction), chat_id, instruction,
+                            stream=engine.edit_deck_streaming(fmt, theme, spec, instruction, user, chat_id), slot="_deck")
+        if ans is None:
+            return None
+        built = engine.built_deck(ans)
+        if not built:  # the Copilot explained instead of building (or could not): its words are the answer
+            return ans
+        reply = adopt_deck(ed, spec, built, instruction, ui, how, note, edits)
+        return Answer(reply, ans.trace, ans.engine)
+    stories = _bd.deck_data(app.ctx, fmt).get("stories") or []
+    new, said = _de.apply(instruction, spec, stories)
+    if not new:
+        ui.done("No change")
+        return Answer(said)
+    ui.say("Building the slides again…")
+    out = app.call("build_brief_pptx", {"format": fmt, "theme": new["theme"], "spec": new}, user)
+    built = out["data"] if out["data"].get("path") else None
+    if not built:
+        ui.done("Not built", "error")
+        why = out["data"].get("error") or out["summary"]
+        return Answer((f"沒有建成：{why}" if zh else f"Not built: {why}"))
+    reply = adopt_deck(ed, spec, built, instruction, ui, how, note, edits)
+    return Answer(reply, [{"tool": "build_brief_pptx", "args": {"format": fmt, "theme": new["theme"]}, "result": out}], "rules")
 
 
 def _ed_ask(instruction, sel=None):
     ed = st.session_state["deck_ed"]
-    ed["pending"] = (instruction, True)
-    ed["chat"].append({"role": "user", "content": instruction})
+    st.session_state["deck_ask"] = (instruction, True)
     if sel:
         ed["sel"] = sel
     _ed_rerun()
@@ -1823,41 +1872,47 @@ def _ed_ask(instruction, sel=None):
 @st.dialog("Slides", width="large", on_dismiss=_close_editor)
 def deck_editor():
     """The slides as a floating window laid out like a presentation app: thumbnails with page numbers on the
-    left, the chosen slide large in the middle, and the Copilot on the right to change the deck by conversation.
-    Build slides opens it too: the Copilot's planning streams into the chat column, every slide first appears as
-    'Planned', and each thumbnail fills in as that slide is laid out."""
+    left, the chosen slide large in the middle, and on the right the same Copilot conversation as everywhere else
+    in the app (saved under the person's name, streamed with a Stop, action row under each answer, follow-ups),
+    here about this deck. Build slides opens it too: the Copilot's planning streams into the conversation, every
+    slide first appears as 'Planned', and each thumbnail fills in as that slide is laid out."""
+    st.session_state["_in_dialog"] = True
     ed = st.session_state.get("deck_ed") or {}
     fmt, theme = ed.get("fmt", "board"), ed.get("theme", "navy-gold")
+    sfx = "e"
     st.html('<span class="loa-deck-ed"></span>')
-    building, pending = bool(ed.get("build")), ed.get("pending")
+    chat_id, turns = current_chat("_deck")
+    turns = absorb_partial(chat_id, turns, "_deck")
+    asked = st.session_state.pop("deck_ask", None)  # a pill, Ask again, the regenerate button or a stage button
+    if isinstance(asked, str):
+        asked = (asked, False)
+    building = bool(ed.get("build"))
     hit = None if building else cached_deck(fmt, theme)
     d = (hit or {}).get("data") or {}
     titles, layouts = d.get("titles") or [], d.get("layouts") or []
     pages = [q for q in d.get("pages") or [] if Path(q).exists()]
     n = len(pages)
     sel = min(max(ed.get("sel") or 1, 1), max(n, 1))
-    # header: name, theme, status, Stop / Build again + Download, close
+    busy = building or bool(asked)
+    # header: name, theme, status, Stop / Build again + Download, history, close
     with st.container(key="deck_top", horizontal=True, vertical_alignment="center", gap="small"):
         st.html(f'<div class="loa-cp-title">{ic("presentation", 18, "accent")}Slides <small>{esc(fx.BRIEF_FORMATS[fmt])}</small></div>',
                 width="content")
         st.segmented_control("Theme", list(THEME_SHORT), format_func=THEME_SHORT.get, key="ed_theme",
                              default=theme, label_visibility="collapsed", on_change=_deck_theme_pick,
-                             disabled=building or bool(pending), width="content")
+                             disabled=busy, width="content")
         head_ph = st.empty()
-        if not building and not pending:
+        if not busy:
             edits = len(d.get("edits") or [])
             head_ph.html(f'<div class="loa-muted loa-ed-status">{n} slides · storyline '
                          f'{"chosen by the Copilot" if d.get("how") == "copilot" else "picked by rules"} from this week\'s data'
                          + (f' · edited {edits} time{"s" if edits != 1 else ""}' if edits else "") + "</div>"
                          if hit else '<div class="loa-muted loa-ed-status">Not built yet</div>')
-        if building:
-            if st.button("Stop", icon=material("square"), key="ed_stop", width="content", help="Keep what is built so far"):
-                ed["build"] = False
-                _ed_rerun()
-        else:
+        if not building:
             if st.button("Build again", icon=material("refresh-cw"), key="ed_rebuild", width="content",
-                         help="Plan the deck again from this week's data", disabled=bool(pending)):
-                ed.update(build=True, chat=[], pending=None, sel=1)
+                         help="Plan the deck again from this week's data", disabled=busy):
+                ed.update(build=True, sel=1)
+                open_chat(None, "_deck")
                 _ed_rerun()
             if hit:
                 st.download_button("Download .pptx", Path(hit["path"]).read_bytes(), file_name=Path(hit["path"]).name,
@@ -1866,6 +1921,8 @@ def deck_editor():
                 if d.get("pdf") and Path(d["pdf"]).exists():
                     st.download_button("PDF", Path(d["pdf"]).read_bytes(), file_name=Path(hit["path"]).stem + ".pdf",
                                        mime="application/pdf", key="ed_dl_pdf", width="content")
+        with st.popover("", icon=material("history"), help="Your conversations about slides", width="content"):
+            deck_history(sfx)
         if st.button("", icon=material("x"), key="ed_close", help="Close · Esc", width="content"):
             _close_editor()
             st.rerun()
@@ -1880,6 +1937,7 @@ def deck_editor():
     with cols[2]:
         with st.container(key="deck_chat"):
             thread = st.container(key="deck_thread")
+            sugg = st.empty()
             ask_ph = st.empty()
     if not building:
         with thumbs_ph.container():
@@ -1908,7 +1966,6 @@ def deck_editor():
                 st.html(f'<div class="loa-ed-count">{sel} / {n}</div>'
                         f'<div class="loa-muted loa-ed-why">{esc(titles[sel - 1] if sel - 1 < len(titles) else "")}'
                         + (f' · <i>Why this slide: {esc(why)}</i>' if why else "") + "</div>", width="stretch")
-                busy = bool(pending)
                 if st.button("", icon=material("arrow-up"), key="ed_up", width="content", help="Move up",
                              disabled=busy or locked or sel <= 2):
                     _ed_ask(f"move slide {sel} up", sel - 1)
@@ -1922,51 +1979,60 @@ def deck_editor():
             with stage_ph.container():
                 for line in d.get("slides") or []:
                     st.markdown(f"- {line}")
-    # the chat column: what was said so far, then the empty state or the instruction being carried out
+    # the conversation column: the same pieces as the Copilot everywhere (saved turns, action rows, follow-ups,
+    # the empty state's pills, a streamed answer with Stop), here about this deck
+    question = asked[0] if asked else None
+    typed = ask_ph.chat_input("Change this deck…", key="ed_chat_in", disabled=busy, max_chars=2000)
+    if typed and not busy:
+        st.session_state["deck_ask"] = (typed, False)
+        _ed_rerun()
+    if not busy:
+        with sugg.container():
+            if not turns:
+                hello_state("Change the deck by asking.",
+                            "Retitle a slide, add or remove one, change the order or the theme. "
+                            + ("The Copilot revises the storyline and builds again; every figure stays checked against the data."
+                               if engine.ready else "The Copilot is offline, so plain commands are applied by rules."),
+                            EDIT_PILLS_ON if engine.ready else EDIT_PILLS_OFF, f"cs_{sfx}", sfx, target="deck_ask")
+            elif (again := follow_up_pills(turns, sfx, target="deck_ask")):
+                st.session_state["deck_ask"] = again
+                _ed_rerun()
     with thread:
-        if not ed.get("chat") and not building:
-            st.html('<div class="loa-cp-hello" style="font-size:18px">Change the deck by asking.</div>'
-                    '<div class="loa-cp-sub">Retitle a slide, add or remove one, change the order or the theme. '
-                    + ("The Copilot revises the storyline and builds again; every figure stays checked against the data."
-                       if engine.ready else "The Copilot is offline, so plain commands are applied by rules.") + "</div>")
-            st.pills("Suggestions", EDIT_PILLS_ON if engine.ready else EDIT_PILLS_OFF, key="ed_pills",
-                     label_visibility="collapsed", on_change=_deck_pick, args=("ed_pills",))
-        for turn in ed.get("chat") or []:
-            with st.chat_message(turn["role"]):
-                st.markdown(turn["content"])
+        thread_view(turns, sfx, busy=busy, target="deck_ask", downloads=False)  # the header holds the downloads
+        title = deck_chat_title(fmt, theme)
         if building:
+            ed["build"] = False  # a Stop lands in the idle editor with what is built
+            asked_line = f"Build the {fx.BRIEF_FORMATS[fmt].lower()} slides on {THEME_SHORT.get(theme, theme)}"
+            with st.chat_message("user"):
+                st.markdown(asked_line)
             with st.chat_message("assistant"):
-                st.markdown("Building the deck…")
-                status = st.status("Planning the slides…", expanded=True)
-                words_ph = st.empty()
-            ed["conv"] = f"deck-{deck_fingerprint(fmt, theme)}"
-            ui = EditorUI(head_ph, thumbs_ph, stage_ph, words_ph, status)
-            how, note = build_deck_now(fmt, theme, ui)
-            ed["build"] = False
+                chat_id = ensure_chat("_deck", title)
+                ui = EditorUI(head_ph, thumbs_ph, stage_ph)
+                how, note, ans = build_deck_now(fmt, theme, ui, chat_id)
             hit = cached_deck(fmt, theme)
-            if hit:
+            if hit and ans is not None:
                 label, plain = DECK_MSG[how]
-                ed["chat"] = [{"role": "assistant", "content": f"**{label}.** {plain}\n\n"
-                               + ("\n".join(f"{i}. {line}" for i, line in enumerate(hit["data"].get("slides") or [], 1)))
-                               + ("\n\n" + note if how == "copilot" and note else "")}]
+                text = (f"**{label}.** {plain}\n\n"
+                        + "\n".join(f"{i}. {line}" for i, line in enumerate(hit["data"].get("slides") or [], 1)))
+                say("user", asked_line, slot="_deck", title=title)
+                say("assistant", text, Answer(text, ans.trace, ans.engine), slot="_deck")
             ed["sel"] = 1
             _ed_rerun()
-        elif pending:
-            ed["pending"] = None
-            instruction, via_rules = pending
+        elif asked:
+            with st.chat_message("user"):
+                st.markdown(question)
             with st.chat_message("assistant"):
-                status = st.status("Working…", expanded=True)
-                words_ph = st.empty()
-                ui = EditorUI(head_ph, thumbs_ph, stage_ph, words_ph, status)
-                reply = edit_deck(ed, hit, instruction, via_rules, ui) if hit else "Build the slides first."
-            ed["chat"].append({"role": "assistant", "content": reply})
-            _ed_rerun()
-    components.html(f"<script>/*{len(ed.get('chat') or [])}-{datetime.now().timestamp()}*/"
+                chat_id = ensure_chat("_deck", title)
+                ui = EditorUI(head_ph, thumbs_ph, stage_ph)
+                ans = edit_deck(ed, hit, question, asked[1], chat_id, ui) if hit else Answer("Build the slides first.")
+                if ans is not None:
+                    show_answer(ans, text_done=True, downloads=False)
+            if ans is not None:
+                say("user", question, slot="_deck", title=title)
+                say("assistant", ans.text, ans, slot="_deck")
+                _ed_rerun()
+    components.html(f"<script>/*{len(turns)}-{datetime.now().timestamp()}*/"
                     "const t=parent.document.querySelector('.st-key-deck_thread'); if (t) t.scrollTop=1e6;</script>", height=0)
-    if (q := ask_ph.chat_input("Change this deck…", key="ed_chat_in", disabled=building or bool(pending))):
-        ed["chat"].append({"role": "user", "content": q})
-        ed["pending"] = (q, False)
-        _ed_rerun()
 
 
 def deck_panel(fmt):

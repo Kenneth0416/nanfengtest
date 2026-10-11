@@ -138,10 +138,10 @@ def stories(d: dict, focus: dict | None = None, rules: list[dict] | None = None)
 
 def plan_spec(d: dict, theme: str | None = None, focus: dict | None = None, rules: list[dict] | None = None) -> dict:
     """A storyline from this week's stories, without a model: the strongest candidates get a slide each."""
-    from build_deck import DEFAULT_THEME, MAX_SLIDES
+    from build_deck import DEFAULT_THEME, PLAN_MAX
     theme = theme or ("data-white" if d["format"] == "ic" else DEFAULT_THEME)
     cands = stories(d, focus, rules)
-    room = MAX_SLIDES - 2 - (1 if d.get("signals") else 0) - (1 if d["format"] == "ic" and d.get("evidence") else 0)
+    room = PLAN_MAX - 2 - (1 if d.get("signals") else 0) - (1 if d["format"] == "ic" and d.get("evidence") else 0)
     strong = [c for c in cands if c["score"] >= 1.5][:min(room, MAX_CONTENT)] or cands[:MIN_CONTENT]
     slides = [{"key": "cover", "layout": "Cover", "eyebrow": "London office market  ·  " + d["date"], "title": d["title"],
                "why": "The headline and the four KPIs open every brief.", "notes": "Headline: " + " ".join(d["headline"]),

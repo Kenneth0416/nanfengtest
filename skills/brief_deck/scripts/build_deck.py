@@ -56,7 +56,8 @@ LAYOUTS = ["Cover", "Section", "Statement", "Hero number", "Stat row", "Chart + 
 CHARTS = ["vacancy", "take_up", "rents", "investment"]
 TABLES = ["yields", "evidence", "deals"]
 HEROES = ["vacancy_pct", "take_up_msqft", "investment_gbp_bn", "active_requirements_msqft", "bank_rate"]
-MIN_SLIDES, MAX_SLIDES = 3, 6
+MIN_SLIDES, MAX_SLIDES = 3, 12  # a brief plans 3-6; the slide editor may grow one to 12
+PLAN_MAX = 6
 SO_WHAT_LAYOUTS = {"Hero number", "Stat row", "Chart + takeaway", "Two charts", "Chart + table", "Numbered pillars",
                    "Timeline", "Title only"}
 KEYS = ("chart", "table", "metric")  # values under these name data, they are not text the agent wrote
@@ -719,7 +720,7 @@ def default_spec(d: dict, theme: str | None = None) -> dict:
                    "fill": {"cards": "auto", "talk": "auto"}})
     slides.append({"key": "sources", "layout": "Sources", "eyebrow": "SOURCES", "title": "Sources and caveats",
                    "notes": "Every figure carries [n]; this list maps each to its source.", "fill": {"body": "auto"}})
-    while len(slides) > MAX_SLIDES:  # keep within six: drop rents first (the deals slide is rent evidence), then capital
+    while len(slides) > PLAN_MAX:  # keep within six: drop rents first (the deals slide is rent evidence), then capital
         drop = next((i for i, s in enumerate(slides) if s.get("key") in ("rents", "capital")), len(slides) - 3)
         slides.pop(drop)
     n = 1

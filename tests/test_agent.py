@@ -974,8 +974,10 @@ def test_a_spec_is_refused_for_bad_theme_layout_count_or_number(deck_app):
     refused(bad, "unknown theme")
     bad = copy.deepcopy(base); bad["slides"][1]["layout"] = "Mood board"
     refused(bad, "unknown layout")
-    bad = copy.deepcopy(base); bad["slides"].insert(2, copy.deepcopy(base["slides"][2]))
-    refused(bad, "7 slides")
+    bad = copy.deepcopy(base)
+    for _ in range(7):  # the slide editor may grow a deck to 12; 13 is refused
+        bad["slides"].insert(2, copy.deepcopy(base["slides"][2]))
+    refused(bad, "13 slides")
     bad = copy.deepcopy(base); bad["slides"][1]["title"] = "Vacancy collapses to 6.5%"
     refused(bad, "numbers not in the data: 6.5")
     bad = copy.deepcopy(base); bad["slides"][1]["so_what"] = "Rents will rise 42% next year"

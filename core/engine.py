@@ -160,13 +160,19 @@ class Engine:
         """An edit to a built deck: the current spec travels with the request so the Copilot changes only what
         was asked and builds the whole deck again from the revised spec."""
         return (f"The team is editing the {'IC' if fmt == 'ic' else 'board'} deck in the slide editor. Its current spec "
-                f"(theme {theme}) is:\n```json\n{json.dumps(spec, ensure_ascii=False)}\n```\n"
+                f"(theme {theme}, {len(spec.get('slides', []))} slides) is:\n```json\n{json.dumps(spec, ensure_ascii=False)}\n```\n"
                 f"They ask: {instruction}\n"
-                "Revise the spec to do exactly that and nothing else (keep the other slides as they are; a new slide "
-                "needs a layout from brief_deck_guide('layouts'), a `why`, and figures only from brief_deck_data; "
-                "renumber the eyebrows). Then call build_brief_pptx with format, theme and the full revised spec; if "
-                "it refuses or lists problems, fix those and build again. Finish with one or two lines saying what "
-                "changed, no list of every slide.")
+                "Rules: do exactly what was asked and nothing else. Never remove, replace or merge a slide unless the "
+                "instruction asks for that; if you cannot do what was asked without removing one, do not build: explain "
+                "why and ask. The editor allows up to 12 slides, so adding never requires dropping one. To add a slide "
+                "(or N slides), call brief_deck_data and take the best-ranked stories that are not already in the deck "
+                "(or the topic named), with a layout from brief_deck_guide('layouts'), a `why`, and figures only as the "
+                "data gives them; keep the cover first and the sources slide last and renumber the eyebrows. Then call "
+                "build_brief_pptx with format, theme and the full revised spec; if it refuses or lists problems, fix "
+                "those and build again (never by dropping slides). Finish with one or two lines, in the language of "
+                "the instruction, that describe the deck exactly as the last successful build returned it: which slides "
+                "were added, changed or moved, and the final slide count. Do not claim anything the build did not do, "
+                "and do not refer to a 'next message'.")
 
     @staticmethod
     def built_deck(ans: Answer) -> dict | None:

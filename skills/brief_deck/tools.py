@@ -257,7 +257,8 @@ TOOLS = [
                              "hero keys), 'style' (themes and colour rules), 'example' (a complete 5-slide board "
                              "spec), 'showcase' (a 6-slide spec using Statement, Stat row, Numbered pillars, Timeline).",
          obj_schema({"topic": {"type": "string", "enum": list(GUIDES)}}), brief_deck_guide),
-    Tool("build_brief_pptx", "Build the team brief as a 3-6 slide PowerPoint (data/exports/...pptx) on a house theme "
+    Tool("build_brief_pptx", "Build the team brief as a 3-6 slide PowerPoint (data/exports/...pptx; up to 12 slides when "
+                             "the team adds pages in the slide editor) on a house theme "
                              f"({', '.join(THEMES)}). Without `spec` it builds the default storyline. `spec` = "
                              "{theme, slides:[{layout, eyebrow, title, so_what, notes, fill}]}: charts, tables, KPI "
                              "tiles, hero figures and footnotes are named by key in `fill` and drawn from the data "
