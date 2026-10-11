@@ -1338,3 +1338,24 @@ def test_each_saved_chat_keeps_its_own_copilot_conversation(app, tmp_path, monke
     assert set(convs) == {"chat-a", "chat-b", "Kenneth"} and len(set(convs.values())) == 3
     assert a.engine.split("conversation ")[1] == a2.engine.split("conversation ")[1] != b.engine.split("conversation ")[1]
     assert "Pi Durable" in cli.text
+
+
+def test_brand_files_are_in_place_and_the_deck_carries_the_co_brand(deck_app):
+    """The sidebar logo, the Nan Fung foot, the favicon and the deck marks all read from assets/brand; the
+    cover carries the co-brand lockup once (as a picture, top right) and content slides the small app icon."""
+    from pptx import Presentation
+    from pptx.util import Inches
+    brand = ROOT / "assets" / "brand"
+    for name in ("logo-horizontal.svg", "nanfung/nanfung-logo-color.svg", "cobrand-nanfung.svg", "favicon-32.png",
+                 "favicon.svg", "favicon.ico", "apple-touch-icon.png", "cobrand-nanfung-on-dark@2x.png", "app-icon-1024.png"):
+        assert (brand / name).exists(), name
+    assert b"<svg" in (brand / "nanfung/nanfung-logo-color.svg").read_bytes()[:400]
+    assert "Nan Fung" in (brand / "README.md").read_text() and "trademark" in (brand / "README.md").read_text()
+    out = deck_app.call("build_brief_pptx", {"format": "board", "theme": "charcoal-amber"}, "Kenneth")
+    prs = Presentation(out["data"]["path"])
+    marks = [sh for sh in prs.slides[0].shapes if sh.name == "co-brand"]
+    assert len(marks) == 1 and marks[0].shape_type == 13  # one picture
+    assert marks[0].left + marks[0].width <= prs.slide_width and marks[0].top >= 0
+    assert marks[0].left > prs.slide_width // 2, "top right, clear of the eyebrow and title"
+    icons = [sh for sl in list(prs.slides)[1:] for sh in sl.shapes if sh.name == "app icon"]
+    assert icons and all(ic.top >= Inches(7) for ic in icons)

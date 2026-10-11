@@ -30,6 +30,25 @@ from pptx.oxml.ns import qn
 from pptx.util import Inches, Pt, Emu
 
 HERE = Path(__file__).resolve().parent.parent
+BRAND = HERE.parent.parent / "assets" / "brand"  # the app logo and the Nan Fung co-brand (python-pptx takes PNG, not SVG)
+
+
+def brand_marks(slide, layout_name: str, prs):
+    """The co-brand lockup (app logo | Nan Fung Group) at the top right of the cover, on the transparent
+    render so it sits on every theme's dark cover, and the small app icon beside the slide number on content
+    slides. Both are skipped quietly when the files are not there, so a copy without assets still builds."""
+    right = prs.slide_width - Inches(0.7)
+    if layout_name == "Cover":
+        png = BRAND / "cobrand-nanfung-on-dark@2x.png"
+        if png.exists():
+            pic = slide.shapes.add_picture(str(png), 0, Inches(0.38), height=Inches(0.62))
+            pic.left = right + Inches(0.12) - pic.width  # the render carries its own clear space
+            pic.name = "co-brand"
+    elif layout_name not in ("Section",):
+        png = BRAND / "app-icon-1024.png"
+        if png.exists():
+            pic = slide.shapes.add_picture(str(png), Inches(11.6), Inches(7.06), height=Inches(0.3))
+            pic.name = "app icon"
 THEMES = json.loads((HERE / "themes" / "themes.json").read_text())
 DEFAULT_THEME = "navy-gold"
 LAYOUTS = ["Cover", "Section", "Statement", "Hero number", "Stat row", "Chart + takeaway", "Two charts",
@@ -737,6 +756,7 @@ def build(d: dict, out: str | Path, spec: dict | None = None, theme: str | None 
         layout = layouts[s["layout"]]
         by_name = {p.name: p.placeholder_format.idx for p in layout.placeholders}
         slide = prs.slides.add_slide(layout)
+        brand_marks(slide, s["layout"], prs)
         present = {p.placeholder_format.idx: p for p in slide.placeholders}
         phs = {name: present[idx] for name, idx in by_name.items() if idx in present}
         fill = {k: (auto[k] if v == "auto" and k in auto else v) for k, v in (s.get("fill") or {}).items()}

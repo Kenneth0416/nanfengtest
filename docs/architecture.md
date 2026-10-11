@@ -59,3 +59,7 @@
 - **換模型**：修改 `llm.provider` 和 `vision`。
 - **Pi 負責思考，Python 負責工具**：Pi 透過 bridge 的 manifest 取得 44 個工具和 8 套參考 skills，工具在 Python 執行，數字一律來自數據庫。
 - **部署**：在 VPS 上運行 Streamlit 加 cron 執行 `main.py refresh / gather`。SQLite 使用 WAL，網頁和排程可以同時讀寫。
+
+## 品牌（2026-10-11）
+
+應用 logo（方向 A「天際線」）與南豐聯名檔在 `assets/brand/`，由 `app.py` 的 `brand_img()` 以 data URI 嵌入側欄頁首、側欄底部「Built for」、Team brief 預覽頁首；`skills/brief_deck/scripts/build_deck.py` 的 `brand_marks()` 在封面右上放聯名版 PNG、內頁頁碼旁放小圖示；分頁 favicon 由 `st.set_page_config(page_icon=...)` 指向 `favicon-32.png`。南豐 logo 為 nanfung.com 官方 SVG 原樣嵌入，商標屬南豐集團，僅供本次面試 PoC 與範例簡報使用（`assets/brand/README.md`）。

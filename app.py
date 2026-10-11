@@ -43,7 +43,11 @@ from core.signals import SignalEngine
 from core.summary import is_tip, team_summary
 from skills.watchlist_alerts.tools import parse_rule
 
-st.set_page_config(page_title="London Office Market Agent", page_icon=":material/apartment:", layout="wide")
+HERE = Path(__file__).resolve().parent
+if not (HERE / "assets").is_dir():  # run through a launcher elsewhere: the project is the working directory
+    HERE = Path.cwd()
+BRAND = HERE / "assets" / "brand"  # the app logo (direction A, skyline) and the Nan Fung co-brand; see assets/brand/README.md
+st.set_page_config(page_title="London Office Market Agent", page_icon=str(BRAND / "favicon-32.png"), layout="wide")
 KIND_LABEL = {"metric_move": "Market data", "vs_long_term": "vs long-term average", "news": "News",
               "pipeline": "New supply", "macro": "Macro", "data_quality": "Data check", "alert": "Your alert"}
 NOT_PEOPLE = {"auto", "cli", "scheduler", "guest", "agent", "team", "poc seed", "auto-update"}
@@ -116,8 +120,15 @@ a.loa-chip { text-decoration:none; }
 .loa-prose { font-size:16px; line-height:1.55; color:var(--ink); }
 .loa-team { border:1px solid var(--line); border-radius:6px; padding:12px 14px; font-size:13px; color:var(--ink2); background:var(--surface); }
 .loa-team b { color:var(--ink); font-size:14px; }
-.loa-brand { display:flex; align-items:center; gap:8px; font-size:17px; font-weight:700; color:var(--ink); margin:4px 0 2px 0; }
-.loa-brand .loa-ic { margin:0; color:var(--accent); }
+.loa-logo { display:block; width:212px; max-width:100%; height:auto; margin:6px 0 2px 0; }
+.loa-logo-cap { font-size:12px; color:var(--ink3); margin:0 0 10px 0; }
+.loa-builtfor { margin:18px 0 4px 0; border-bottom:1px solid var(--line); padding-bottom:12px; }
+.loa-builtfor .loa-kicker { margin-bottom:8px; }
+.loa-builtfor img { display:block; width:118px; height:auto; }
+.loa-cobrand { display:flex; align-items:flex-end; justify-content:space-between; gap:16px; border-bottom:1px solid var(--line); padding:4px 0 12px 0; margin:4px 0 12px 0; }
+.loa-cobrand img { display:block; width:420px; max-width:70%; height:auto; }
+.loa-cobrand span { font-size:12px; color:var(--ink3); white-space:nowrap; }
+@media (max-width:640px) { .loa-logo { width:168px; } .loa-builtfor img { width:72px; } }
 /* Copilot floating button: bottom right of every page, above the content; gone while the panel is open */
 .st-key-fab_copilot { position:fixed; right:max(20px, env(safe-area-inset-right)); bottom:max(20px, env(safe-area-inset-bottom));
   z-index:1001; width:auto !important; }
@@ -153,6 +164,17 @@ def chip(text, kind="", href="") -> str:
 
 def kicker(text) -> str:
     return f'<div class="loa-kicker">{esc(text)}</div>'
+
+
+@st.cache_resource(show_spinner=False)
+def brand_img(name: str, cls: str = "", alt: str = "") -> str:
+    """An <img> for a file in assets/brand as a data URI (st.html keeps <img>, it strips inline <svg>), so the
+    logos never depend on static-file serving. The Nan Fung SVG is embedded exactly as published."""
+    import base64
+    path = BRAND / name
+    mime = "image/svg+xml" if path.suffix == ".svg" else "image/png"
+    data = base64.b64encode(path.read_bytes()).decode()
+    return f'<img class="{cls}" alt="{esc(alt)}" src="data:{mime};base64,{data}">'
 
 
 def tier(kind: str, label: str) -> str:
@@ -293,8 +315,8 @@ def when(ts: str) -> str:
 def sidebar():
     global user
     with st.sidebar:
-        st.html(f'<div class="loa-brand">{ic("building", 20)}London Office Market Agent</div>')
-        st.caption("Proof of concept · live data library")
+        st.html(brand_img("logo-horizontal.svg", "loa-logo", "London Office Market Agent")
+                + '<div class="loa-logo-cap">Prototype · sample data</div>')
         user = st.text_input("Your name", key="me",
                              help="Used for your own 'For you' view and to show the team who added what").strip() or "Guest"
         if user != "Guest" and st.query_params.get("me") != user:
@@ -319,6 +341,8 @@ Anyone can upload a report; the whole team sees it.</div>""")
         with st.expander("Technical details"):
             st.caption(f"Engine: {engine.status}")
             st.caption(f"PDF reader: {app.vision.model if getattr(app.vision, 'available', False) else 'rule-based text reading'}")
+        st.html(f'<div class="loa-builtfor">{kicker("Built for")}'
+                + brand_img("nanfung/nanfung-logo-color.svg", "", "Nan Fung Group") + "</div>")
 
 
 def goto(key: str, **state):
@@ -1330,6 +1354,8 @@ def brief_page():
     row[2].download_button("Download (.md)", brief, file_name="london-office-team-brief.md", width="stretch")
     deck_panel(fmt)
     with st.container(border=True):
+        st.html(f'<div class="loa-cobrand">{brand_img("cobrand-nanfung.svg", "", "London Office Market Agent · Nan Fung Group")}'
+                f'<span>{esc(fx.BRIEF_FORMATS[fmt])}</span></div>')
         st.markdown(re.sub(r"^(#{1,2}) ", lambda m: "#" * (len(m.group(1)) + 2) + " ", brief, flags=re.M))
         chart(app.call("get_metric_trend", {"market": "London", "metric": "vacancy_pct"})["chart"])
     c = st.columns([2.2, 4.8], vertical_alignment="center")

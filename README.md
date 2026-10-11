@@ -235,6 +235,13 @@ connectors/  (pluggable data sources)      skills/  (pluggable agent skills, SKI
 
 ## Look and feel
 
+The app carries its own logo (direction A, "Skyline": `assets/brand/`) at the top of the sidebar, the Nan Fung
+Group mark under a "Built for" label at the foot of the sidebar, the co-brand lockup on the Team brief page and at
+the top right of every deck cover, and the small app icon beside the slide number on content slides; the browser
+tab shows the favicon. The Nan Fung logo is the official SVG from nanfung.com, embedded unchanged; it is a
+trademark of Nan Fung Group and is used here only for this interview proof of concept and its sample decks
+(placement rules and the full note: `assets/brand/README.md`).
+
 The app follows the team's design tokens (`prototype/design-tokens.md`): slate neutrals, one navy accent
 (`#1B3A5C`) for primary buttons, links and selected states, amber (`#B9781A`) as the only highlight, and four
 low-saturation semantic colours that mean one thing each: green for open data collected automatically, amber
