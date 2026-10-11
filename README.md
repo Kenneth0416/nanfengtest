@@ -172,8 +172,7 @@ database), and the Copilot, uploads and gathering rounds say what is missing ins
 
 ### Running on a server
 
-The evaluation instance is at https://kenneth-london-office.convert-md.com; reviewers get the access key from
-Kenneth (the site sets a cookie from `?key=`; the key lives only in the server's `.env`, never in this repo).
+The evaluation instance is public at https://kenneth-london-office.convert-md.com (no login or key).
 
 `docker compose --profile server up -d` adds Caddy (HTTPS, certificate renewal) in front of the app: set
 your domain in `deploy/Caddyfile`, put the key in `.env`, and install `deploy/london-agent-collect.timer`
